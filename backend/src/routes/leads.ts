@@ -35,15 +35,26 @@ router.get('/', authenticate, async (req, res) => {
     }
 
     // Фильтрация по дате следующего контакта
+    // «На сегодня» = контакт запланирован на сегодня ИЛИ уже просрочен (раньше начала сегодняшнего дня).
+    // Иначе просроченные лиды не попадали ни в today, ни в future и пропадали из вкладки.
     if (contactDateFilter === 'today') {
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
       const endOfDay = new Date();
       endOfDay.setHours(23, 59, 59, 999);
-      where.nextContactDate = {
-        gte: startOfDay,
-        lte: endOfDay,
+      const todayOrOverdue = {
+        OR: [
+          { nextContactDate: { gte: startOfDay, lte: endOfDay } },
+          { nextContactDate: { lt: startOfDay } },
+        ],
       };
+      if (!where.AND) {
+        where.AND = [todayOrOverdue];
+      } else if (Array.isArray(where.AND)) {
+        where.AND.push(todayOrOverdue);
+      } else {
+        where.AND = [where.AND, todayOrOverdue];
+      }
     } else if (contactDateFilter === 'future') {
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);

@@ -5,6 +5,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useCallback,
   type FormEvent,
   type ReactNode,
 } from 'react'
@@ -28,6 +29,7 @@ import {
   CalendarRange,
   ChevronLeft,
   ChevronRight,
+  Search,
 } from 'lucide-react'
 
 interface Lead {
@@ -259,6 +261,9 @@ export default function LeadsPage() {
   const [loading, setLoading] = useState(true)
   const [sourceFilter, setSourceFilter] = useState('all')
   const [managerFilter, setManagerFilter] = useState('all')
+  const [contactsSearchInput, setContactsSearchInput] = useState('')
+  const [contactsSearchDebounced, setContactsSearchDebounced] = useState('')
+  const [reschedulingLeadId, setReschedulingLeadId] = useState<string | null>(null)
 
   const [showNewLeadForm, setShowNewLeadForm] = useState(false)
   const [clients, setClients] = useState<ClientOption[]>([])
@@ -301,6 +306,14 @@ export default function LeadsPage() {
     formatDateKey(new Date()),
   )
   const calendarOpenedRef = useRef(false)
+  const contactsInitialLoadRef = useRef(true)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setContactsSearchDebounced(contactsSearchInput.trim())
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [contactsSearchInput])
 
   const todayKey = formatDateKey(new Date())
 
@@ -322,15 +335,34 @@ export default function LeadsPage() {
     return sourceMatches && managerMatches
   }
 
+  const isLeadOverdue = (lead: Lead) => {
+    if (!lead.nextContactDate) return false
+    const nextContactTime = new Date(lead.nextContactDate).getTime()
+    if (Number.isNaN(nextContactTime)) return false
+    return nextContactTime < Date.now()
+  }
+
+  const sortLeadsWithOverdueFirst = (leads: Lead[]) =>
+    leads.slice().sort((a, b) => {
+      const aOverdue = isLeadOverdue(a) ? 1 : 0
+      const bOverdue = isLeadOverdue(b) ? 1 : 0
+      if (aOverdue !== bOverdue) return bOverdue - aOverdue
+
+      const aDate = a.nextContactDate ? new Date(a.nextContactDate).getTime() : Number.MAX_SAFE_INTEGER
+      const bDate = b.nextContactDate ? new Date(b.nextContactDate).getTime() : Number.MAX_SAFE_INTEGER
+      return aDate - bDate
+    })
+
   const filteredTodayLeads = useMemo(
-    () => todayLeads.filter(applyLeadFilters),
+    () => sortLeadsWithOverdueFirst(todayLeads.filter(applyLeadFilters)),
     [todayLeads, sourceFilter, managerFilter],
   )
 
   const filteredFutureLeads = useMemo(
-    () => futureLeads.filter(applyLeadFilters),
+    () => sortLeadsWithOverdueFirst(futureLeads.filter(applyLeadFilters)),
     [futureLeads, sourceFilter, managerFilter],
   )
+
   const filteredClients = useMemo(() => {
     const searchValue = clientSearch.trim().toLowerCase()
     if (!searchValue) return clients.slice(0, 10)
@@ -494,7 +526,6 @@ export default function LeadsPage() {
   }
 
   useEffect(() => {
-    loadLeads()
     loadClients()
     void auth.getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null))
   }, [])
@@ -551,19 +582,22 @@ export default function LeadsPage() {
     calendarOpenedRef.current = showCalendar
   }, [showCalendar, sortedEventDates, todayKey])
 
-  const loadLeads = async (options?: { showSpinner?: boolean }) => {
+  const loadLeads = useCallback(async (options?: { showSpinner?: boolean }) => {
     const showSpinner = options?.showSpinner ?? true
+    const searchParams =
+      contactsSearchDebounced.length > 0 ? { search: contactsSearchDebounced } : {}
+
     if (showSpinner) {
       setLoading(true)
     }
     try {
       const todayResponse = await api.get('/leads', {
-        params: { contactDateFilter: 'today' },
+        params: { contactDateFilter: 'today', ...searchParams },
       })
       setTodayLeads(todayResponse.data.data || [])
 
       const futureResponse = await api.get('/leads', {
-        params: { contactDateFilter: 'future' },
+        params: { contactDateFilter: 'future', ...searchParams },
       })
       setFutureLeads(futureResponse.data.data || [])
     } catch (error) {
@@ -573,7 +607,12 @@ export default function LeadsPage() {
         setLoading(false)
       }
     }
-  }
+  }, [contactsSearchDebounced])
+
+  useEffect(() => {
+    void loadLeads({ showSpinner: contactsInitialLoadRef.current })
+    contactsInitialLoadRef.current = false
+  }, [loadLeads])
 
   const resetModalState = () => {
     setModalType(null)
@@ -1042,6 +1081,24 @@ export default function LeadsPage() {
     }
   }
 
+  const handleQuickReschedule = async (lead: Lead, days: number) => {
+    setReschedulingLeadId(lead.id)
+    try {
+      const base = lead.nextContactDate ? new Date(lead.nextContactDate) : new Date()
+      const next = new Date(base)
+      next.setDate(next.getDate() + days)
+      await api.put(`/leads/${lead.id}`, {
+        nextContactDate: next.toISOString(),
+      })
+      await loadLeads({ showSpinner: false })
+    } catch (error) {
+      console.error('Failed to reschedule contact:', error)
+      alert('Не удалось перенести дату контакта.')
+    } finally {
+      setReschedulingLeadId(null)
+    }
+  }
+
   const LeadCard = ({
     lead,
     showDate = false,
@@ -1049,6 +1106,8 @@ export default function LeadsPage() {
     onOpenOrder,
     onCloseContact,
     onDeleteLead,
+    onQuickReschedule,
+    reschedulingLeadId,
     showDeleteButton,
     variant,
   }: {
@@ -1058,6 +1117,8 @@ export default function LeadsPage() {
     onOpenOrder: () => void
     onCloseContact: () => void
     onDeleteLead: () => void
+    onQuickReschedule: (days: number) => void
+    reschedulingLeadId: string | null
     showDeleteButton: boolean
     variant?: 'default' | 'compact'
   }) => {
@@ -1071,10 +1132,15 @@ export default function LeadsPage() {
       /\bЗаметки:/i.test(lead.description ?? '')
     const descriptionText =
       contactPurpose || (!hasStructuredDescription ? lead.description?.trim() ?? '' : '')
+    const isOverdue = isLeadOverdue(lead)
     const cardClass =
       cardVariant === 'compact'
-        ? 'group relative block overflow-hidden rounded-xl border border-gray-200 bg-white px-4 py-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary-200 hover:shadow-md'
-        : 'group relative block overflow-hidden rounded-2xl border border-gray-200 bg-white px-5 py-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary-200 hover:shadow-lg'
+        ? `group relative block overflow-hidden rounded-xl border px-4 py-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${
+            isOverdue ? 'border-red-200 bg-red-50/70 hover:border-red-300' : 'border-gray-200 bg-white hover:border-primary-200'
+          }`
+        : `group relative block overflow-hidden rounded-2xl border px-5 py-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg ${
+            isOverdue ? 'border-red-200 bg-red-50/70 hover:border-red-300' : 'border-gray-200 bg-white hover:border-primary-200'
+          }`
     const accentBarClass =
       cardVariant === 'compact'
         ? 'absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-primary-500 via-primary-400 to-primary-600'
@@ -1112,15 +1178,36 @@ export default function LeadsPage() {
       cardVariant === 'compact'
         ? 'inline-flex items-center gap-1.5 px-2 py-1 transition'
         : 'inline-flex items-center gap-1.5 px-2 py-1 transition'
+    const quickBtnClass =
+      cardVariant === 'compact'
+        ? 'inline-flex items-center gap-1 rounded-lg border border-amber-200/90 bg-amber-50/90 px-2 py-1 text-[11px] font-semibold text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60'
+        : 'inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60'
+    const isRescheduling = reschedulingLeadId === lead.id
     const topMetaClass =
       cardVariant === 'compact'
         ? 'flex flex-col items-end gap-1.5 text-right pt-4'
         : 'flex flex-col items-end gap-2 text-right pt-6'
 
+    const openLeadPage = () => {
+      router.push(`/leads/${lead.id}`)
+    }
+
     return (
-      <Link
-        href={`/leads/${lead.id}`}
-        className={cardClass}
+      <div
+        role="link"
+        tabIndex={0}
+        className={`${cardClass} cursor-pointer`}
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest('button')) return
+          openLeadPage()
+        }}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            openLeadPage()
+          }
+        }}
       >
         <div aria-hidden className={accentBarClass} />
         <div aria-hidden className={haloClass} />
@@ -1146,8 +1233,17 @@ export default function LeadsPage() {
                   <UserIcon className="h-3.5 w-3.5 text-gray-500" />
                   <span>{managerName}</span>
                 </span>
+                {isOverdue ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700">
+                    Просрочен
+                  </span>
+                ) : null}
                 {lead.nextContactDate ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600">
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                      isOverdue ? 'bg-red-100 text-red-700' : 'bg-gray-50 text-gray-600'
+                    }`}
+                  >
                     {showDate
                       ? formatDate(lead.nextContactDate)
                       : formatDateTime(lead.nextContactDate)}
@@ -1185,6 +1281,48 @@ export default function LeadsPage() {
           ) : (
             <p className="text-sm text-gray-400">Цель контакта не указана</p>
           )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+              Перенос
+            </span>
+            <button
+              type="button"
+              className={quickBtnClass}
+              disabled={isRescheduling}
+              title="Сохранить время суток, дата +1 день"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onQuickReschedule(1)
+              }}
+            >
+              {isRescheduling ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Calendar className="h-3 w-3" />
+              )}
+              Завтра
+            </button>
+            <button
+              type="button"
+              className={quickBtnClass}
+              disabled={isRescheduling}
+              title="+7 дней от текущей даты контакта"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onQuickReschedule(7)
+              }}
+            >
+              {isRescheduling ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Calendar className="h-3 w-3" />
+              )}
+              +7 дн.
+            </button>
+          </div>
 
           <div className={actionsRowClass}>
             <button
@@ -1225,7 +1363,7 @@ export default function LeadsPage() {
             </button>
           </div>
         </div>
-      </Link>
+      </div>
     )
   }
 
@@ -1261,9 +1399,30 @@ export default function LeadsPage() {
         <div className="rounded-2xl border border-primary-100 bg-gradient-to-r from-primary-50/70 via-white to-primary-50/30 p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-2">
             <p className="text-sm font-semibold text-gray-900">Фильтры контактов</p>
-            <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-gray-500 shadow-sm">
-              Быстрый поиск
-            </span>
+            {contactsSearchDebounced ? (
+              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-primary-600 shadow-sm">
+                Поиск активен
+              </span>
+            ) : null}
+          </div>
+          <div className="mb-4">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Поиск по контактам
+            </label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <input
+                type="search"
+                value={contactsSearchInput}
+                onChange={(event) => setContactsSearchInput(event.target.value)}
+                placeholder="Имя клиента, телефон или менеджер…"
+                autoComplete="off"
+                className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-3 text-sm text-gray-900 shadow-sm transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              Совпадения по клиенту и менеджеру на сервере; фильтры источника и менеджера ниже применяются к результату.
+            </p>
           </div>
           <div
             className={`grid gap-3 ${canViewAllLeads(currentUser) ? 'sm:grid-cols-2' : ''}`}
@@ -1685,7 +1844,9 @@ export default function LeadsPage() {
                     Нет контактов на сегодня
                   </p>
                   <p className="text-sm text-gray-500">
-                    Добавьте новый контакт или измените фильтры
+                    {contactsSearchDebounced
+                      ? 'Попробуйте изменить поиск или фильтры'
+                      : 'Добавьте новый контакт или измените фильтры'}
                   </p>
                 </div>
               ) : (
@@ -1695,6 +1856,8 @@ export default function LeadsPage() {
                       key={lead.id}
                       lead={lead}
                       showDeleteButton={canHardDeleteLead(currentUser)}
+                      reschedulingLeadId={reschedulingLeadId}
+                      onQuickReschedule={(days) => handleQuickReschedule(lead, days)}
                       onOpenNotes={() => openLeadModal(lead, 'notes')}
                       onOpenOrder={() => openLeadModal(lead, 'order')}
                       onCloseContact={() => openLeadModal(lead, 'close')}
@@ -1721,7 +1884,9 @@ export default function LeadsPage() {
                   <Calendar className="mx-auto mb-3 h-12 w-12 text-gray-400" />
                   <p className="font-medium text-gray-700">Нет запланированных контактов</p>
                   <p className="text-sm text-gray-500">
-                    Измените фильтры или назначьте дату следующего контакта
+                    {contactsSearchDebounced
+                      ? 'Попробуйте изменить поиск или фильтры'
+                      : 'Измените фильтры или назначьте дату следующего контакта'}
                   </p>
                 </div>
               ) : (
@@ -1733,6 +1898,8 @@ export default function LeadsPage() {
                       showDate
                       variant="compact"
                       showDeleteButton={canHardDeleteLead(currentUser)}
+                      reschedulingLeadId={reschedulingLeadId}
+                      onQuickReschedule={(days) => handleQuickReschedule(lead, days)}
                       onOpenNotes={() => openLeadModal(lead, 'notes')}
                       onOpenOrder={() => openLeadModal(lead, 'order')}
                       onCloseContact={() => openLeadModal(lead, 'close')}
