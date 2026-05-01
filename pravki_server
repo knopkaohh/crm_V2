@@ -105,6 +105,26 @@ fc-list | grep -i 'century gothic\|Gothic'
 
 После этого снова сформируй счёт (перезапуск PM2 обычно не нужен). Если в выводе `fc-list` шрифт не виден — проверь права на файлы и путь.
 
+Убедись, что LibreOffice **не из snap** (`which soffice` не должен быть в `/snap/`): snap часто **не видит** шрифты в `/usr/local/share/fonts`. Нужен пакет из apt (`libreoffice-writer-nogui`).
+
+Проверка, что запрос «Century Gothic» из шаблона попадает в нужный файл:
+
+```bash
+fc-match -s "Century Gothic" | head -5
+```
+
+Если первым идёт не Century Gothic — подстановка будет уже на этапе вёрстки.
+
+В шаблоне Word текст может быть в шрифте **темы оформления**, а не явным Century Gothic. Открой `.docx`, выдели блоки счёта → в шрифтах выбери **Century Gothic** напрямую (не «тема» / не «+Заголовок»), сохрани шаблон в репозитории.
+
+После обновления бэкенда в логах при скачивании счёта будет строка **`[invoice] --convert-to:`** — там должен быть `pdf:writer_pdf_Export` (явный экспорт из Writer).
+
+Если внешний вид шрифта всё ещё не тот, в `backend/.env` попробуй по очереди:
+
+- `INVOICE_LIBREOFFICE_PDF_A2=1` — PDF/A-2b и встраивание стандартных шрифтов по параметрам LibreOffice (часто лучше для «кастомных» TTF).
+- `INVOICE_LIBREOFFICE_WRITER_FLAG=1` — добавляет `--writer` к CLI конвертации (на части серверов стабильнее).
+- `INVOICE_LIBREOFFICE_PDF_FILTER=...` — полная строка фильтра (для экспертов), см. [PDF CLI Parameters](https://help.libreoffice.org/latest/en-US/text/shared/guide/pdf_params.html).
+
 Убедиться, что в репозитории на сервере есть каталог `backend/templates/` с `.docx` шаблоном счёта.
 
 Опционально в `.env` бэкенда:

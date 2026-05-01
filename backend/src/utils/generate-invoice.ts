@@ -228,6 +228,29 @@ export async function generateInvoicePdfSimple(data: InvoiceData): Promise<Buffe
 }
 
 /**
+ * Аргумент для `--convert-to`: явный фильтр Writer→PDF (иначе LO иногда иначе подбирает шрифты).
+ * INVOICE_LIBREOFFICE_PDF_FILTER — полная строка, например pdf:writer_pdf_Export:{"SelectPdfVersion":...}
+ * INVOICE_LIBREOFFICE_PDF_A2=1 — PDF/A-2b + встраивание стандартных шрифтов (часто лучше сохраняет шрифты вроде Century Gothic при наличии TTF в системе).
+ */
+function buildLibreOfficePdfConvertToArg(): string {
+  const full = process.env.INVOICE_LIBREOFFICE_PDF_FILTER?.trim();
+  if (full) {
+    return full.startsWith('pdf:') ? full : `pdf:${full}`;
+  }
+  const pdfA2 = ['1', 'true', 'yes'].includes(
+    String(process.env.INVOICE_LIBREOFFICE_PDF_A2 || '').toLowerCase(),
+  );
+  if (pdfA2) {
+    const filterData = JSON.stringify({
+      SelectPdfVersion: { type: 'long', value: '2' },
+      EmbedStandardFonts: { type: 'boolean', value: 'true' },
+    });
+    return `pdf:writer_pdf_Export:${filterData}`;
+  }
+  return 'pdf:writer_pdf_Export';
+}
+
+/**
  * Конвертирует Word документ в PDF используя LibreOffice в фоновом режиме (без показа окна/терминала)
  */
 async function convertWordToPDF(wordPath: string, pdfPath: string): Promise<void> {
@@ -245,11 +268,15 @@ async function convertWordToPDF(wordPath: string, pdfPath: string): Promise<void
   const baseName = path.basename(wordPath, path.extname(wordPath));
   const generatedPdfPath = path.join(outputDir, `${baseName}.pdf`);
 
+  const convertToArg = buildLibreOfficePdfConvertToArg();
   console.log('[invoice] конвертация DOCX→PDF, LibreOffice:', libreOfficePath);
-  
+  console.log('[invoice] --convert-to:', convertToArg.length > 180 ? `${convertToArg.slice(0, 180)}…` : convertToArg);
+
+  const writerFlag = ['1', 'true', 'yes'].includes(
+    String(process.env.INVOICE_LIBREOFFICE_WRITER_FLAG || '').toLowerCase(),
+  );
+
   // Используем spawn вместо exec для более тихого запуска
-  // Флаги: --headless (без GUI), --invisible (невидимый), --nodefault (без окна по умолчанию)
-  // --nolockcheck (не проверять блокировки), --norestore (не восстанавливать окна)
   return new Promise((resolve, reject) => {
     const args = [
       '--headless',
@@ -257,26 +284,27 @@ async function convertWordToPDF(wordPath: string, pdfPath: string): Promise<void
       '--nodefault',
       '--nolockcheck',
       '--norestore',
-      '--convert-to', 'pdf',
-      '--outdir', outputDir,
-      wordPath
+      ...(writerFlag ? ['--writer'] : []),
+      '--convert-to',
+      convertToArg,
+      '--outdir',
+      outputDir,
+      wordPath,
     ];
-    
-    // Запускаем процесс в фоне с минимальным выводом
-    const process = spawn(libreOfficePath, args, {
-      stdio: ['ignore', 'ignore', 'pipe'], // stdin, stdout игнорируем, stderr в pipe для ошибок
-      windowsHide: true, // Скрываем окно в Windows
-      detached: false, // Не отсоединяем процесс
+
+    const loChild = spawn(libreOfficePath, args, {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true,
+      detached: false,
     });
-    
+
     let errorOutput = '';
-    
-    process.stderr.on('data', (data: Buffer) => {
+
+    loChild.stderr?.on('data', (data: Buffer) => {
       errorOutput += data.toString();
     });
-    
-    process.on('close', async (code: number) => {
-      // Ждем немного, чтобы файл точно создался
+
+    loChild.on('close', async (code: number) => {
       setTimeout(async () => {
         try {
           await fsPromises.access(generatedPdfPath);
@@ -286,7 +314,6 @@ async function convertWordToPDF(wordPath: string, pdfPath: string): Promise<void
           console.log('PDF файл успешно создан:', pdfPath);
           resolve();
         } catch {
-          // Пробуем альтернативные пути
           const altPath = wordPath.replace(/\.docx?$/i, '.pdf');
           try {
             await fsPromises.access(altPath);
@@ -297,17 +324,16 @@ async function convertWordToPDF(wordPath: string, pdfPath: string): Promise<void
             reject(new Error(`PDF файл не был создан. Код выхода: ${code}. Ошибки: ${errorOutput || 'нет'}`));
           }
         }
-      }, 1500); // Увеличиваем время ожидания до 1.5 секунд
+      }, 1500);
     });
-    
-    process.on('error', (error: Error) => {
+
+    loChild.on('error', (error: Error) => {
       reject(new Error(`Ошибка запуска LibreOffice: ${error.message}`));
     });
-    
-    // Таймаут на случай зависания
+
     setTimeout(() => {
-      if (!process.killed) {
-        process.kill();
+      if (!loChild.killed) {
+        loChild.kill();
         reject(new Error('Конвертация превысила таймаут (30 секунд)'));
       }
     }, 30000);
