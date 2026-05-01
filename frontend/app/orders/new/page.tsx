@@ -342,7 +342,7 @@ export default function NewOrderPage() {
             }
           }
           const blob = new Blob([pdfResponse.data], { type: 'application/pdf' })
-          showInvoicePdfFromBlob(blob, fileName, invoicePdfTab)
+          await showInvoicePdfFromBlob(blob, fileName, invoicePdfTab)
         } catch (pdfError: unknown) {
           console.error('Failed to download invoice:', pdfError)
           try {

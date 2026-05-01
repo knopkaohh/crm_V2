@@ -467,7 +467,7 @@ export default function OrderDetailPage() {
         })
         const blob = new Blob([res.data], { type: 'application/pdf' })
         const dateRu = new Date().toLocaleDateString('ru-RU')
-        showInvoicePdfFromBlob(blob, `Счёт №${orderNumber} от ${dateRu}.pdf`, placeholderTab)
+        await showInvoicePdfFromBlob(blob, `Счёт №${orderNumber} от ${dateRu}.pdf`, placeholderTab)
       } catch (e: unknown) {
         console.error('Invoice download failed:', e)
         try {

@@ -1,6 +1,6 @@
 /**
- * PDF счёта на мобильных: атрибут download часто игнорируется.
- * Важно открыть вкладку синхронно с жестом пользователя (до await fetch).
+ * PDF счёта: на мобильных «Поделиться» из просмотра blob даёт blob:… и document.pdf.
+ * Используем navigator.share({ files: [File] }) — тогда в Telegram/WhatsApp уходит нормальный файл и имя.
  */
 
 export function isLikelyMobileDevice(): boolean {
@@ -11,7 +11,7 @@ export function isLikelyMobileDevice(): boolean {
   return false
 }
 
-/** Вызовите из обработчика клика ДО любого await, только на мобильных открывает вкладку-плейсхолдер. */
+/** Вызовите из обработчика клика ДО любого await — только на мобильных открывает вкладку-плейсхолдер под просмотр PDF. */
 export function openInvoicePdfPlaceholderTab(): Window | null {
   if (!isLikelyMobileDevice()) return null
   const popup = window.open('about:blank', '_blank')
@@ -29,9 +29,62 @@ export function openInvoicePdfPlaceholderTab(): Window | null {
   return popup
 }
 
-/** После получения Blob: либо в уже открытую вкладку, либо скачать / открыть через ссылку. */
-export function showInvoicePdfFromBlob(blob: Blob, fileName: string, placeholderTab: Window | null): void {
-  const url = URL.createObjectURL(blob)
+function sanitizeInvoiceFileName(name: string): string {
+  const t = name.replace(/[/\\?%*:|"<>]/g, '-').replace(/\s+/g, ' ').trim()
+  const withPdf = t.toLowerCase().endsWith('.pdf') ? t : `${t || 'schet'}.pdf`
+  return withPdf
+}
+
+function isShareDismissed(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === 'AbortError') return true
+  if (typeof err === 'object' && err !== null && 'name' in err && (err as { name: string }).name === 'AbortError') {
+    return true
+  }
+  return false
+}
+
+/** После получения Blob: на телефоне сначала системное «Поделиться» с корректным именем файла; при отмене — просмотр PDF во вкладке. */
+export async function showInvoicePdfFromBlob(
+  blob: Blob,
+  fileName: string,
+  placeholderTab: Window | null,
+): Promise<void> {
+  const safeName = sanitizeInvoiceFileName(fileName)
+  const pdfBlob = blob.type === 'application/pdf' ? blob : new Blob([blob], { type: 'application/pdf' })
+  const file = new File([pdfBlob], safeName, { type: 'application/pdf', lastModified: Date.now() })
+
+  let canShareFiles = false
+  try {
+    canShareFiles =
+      typeof navigator !== 'undefined' &&
+      typeof navigator.share === 'function' &&
+      typeof navigator.canShare === 'function' &&
+      navigator.canShare({ files: [file] })
+  } catch {
+    canShareFiles = false
+  }
+
+  if (isLikelyMobileDevice() && canShareFiles) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: safeName.replace(/\.pdf$/i, ''),
+      })
+      try {
+        placeholderTab?.close()
+      } catch {
+        /* ignore */
+      }
+      return
+    } catch (err: unknown) {
+      if (!isShareDismissed(err)) {
+        console.warn('navigator.share:', err)
+      }
+      /* Отмена или ошибка — ниже открываем просмотр */
+    }
+  }
+
+  const url = URL.createObjectURL(pdfBlob)
 
   if (placeholderTab && !placeholderTab.closed) {
     placeholderTab.location.href = url
@@ -41,7 +94,7 @@ export function showInvoicePdfFromBlob(blob: Blob, fileName: string, placeholder
 
   const a = document.createElement('a')
   a.href = url
-  a.download = fileName
+  a.download = safeName
   a.target = '_blank'
   a.rel = 'noopener noreferrer'
   document.body.appendChild(a)
