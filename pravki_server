@@ -63,7 +63,18 @@ curl -sI https://crm-bm.ru/login | head -5
 
 ## Счёт PDF и Google Sheets на VPS
 
-**502 на `/api/orders/.../invoice`** чаще всего: нет LibreOffice, нет шрифтов для PDF, долгая конвертация (nginx обрывает по таймауту).
+**502 одновременно на нескольких `/api/...`** (список заказов, уведомления, счёт, WebSocket) — это не PDF: **бэкенд не отвечает** (процесс упал, другой порт, OOM). На сервере по SSH:
+
+```bash
+pm2 status
+pm2 logs crm-backend --lines 100
+# порт из backend/.env PORT или по умолчанию 3001:
+curl -sS http://127.0.0.1:3001/health
+```
+
+Если `health` не отватает или процесс `errored` — `pm2 restart crm-backend` и смотри ошибку в логах. Убедись, что в nginx `proxy_pass` на тот же порт, что слушает Node.
+
+**502 только на `/api/orders/.../invoice`** чаще всего: нет LibreOffice, нет шрифтов для PDF, долгая конвертация (nginx обрывает по таймауту). Тогда помогают `INVOICE_SIMPLE_FIRST=1` или `INVOICE_SIMPLE_PDF=1` и шрифты (ниже).
 
 На сервере (Debian/Ubuntu) имеет смысл:
 

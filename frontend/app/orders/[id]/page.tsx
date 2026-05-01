@@ -556,7 +556,7 @@ export default function OrderDetailPage() {
             <h1 className="text-3xl font-bold text-gray-900">Заказ {order.orderNumber || order.id}</h1>
             <p className="text-gray-600 mt-1">{statusLabels[order.status] || order.status}</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {isEditing ? (
               <>
                 <button
@@ -606,21 +606,6 @@ export default function OrderDetailPage() {
                   </>
                 )}
                 <button
-                  onClick={() => router.back()}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Назад
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-xl shadow-primary-900/5 space-y-4 md:col-span-2">
-            {!isEditing && (
-              <div className="flex flex-wrap items-center justify-end gap-2 pb-4 border-b border-gray-100">
-                <button
                   type="button"
                   onClick={() => void handleDownloadInvoice()}
                   disabled={invoiceDownloading}
@@ -637,8 +622,20 @@ export default function OrderDetailPage() {
                   <Edit2 className="h-4 w-4 shrink-0" />
                   Редактировать
                 </button>
-              </div>
+                <button
+                  type="button"
+                  onClick={() => router.back()}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Назад
+                </button>
+              </>
             )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-xl shadow-primary-900/5 space-y-4 md:col-span-2">
             <div className="flex items-center justify-between">
               <div className="flex-1">
                 <p className="text-sm text-gray-500 mb-2">Клиент</p>
