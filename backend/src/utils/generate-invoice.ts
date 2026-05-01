@@ -2,6 +2,8 @@ import * as path from 'path';
 import fs from 'fs';
 import { promises as fsPromises } from 'fs';
 import { execSync } from 'child_process';
+import { randomUUID } from 'crypto';
+import { pathToFileURL } from 'url';
 import PDFDocument from 'pdfkit';
 import { Order, Client, OrderItem } from '@prisma/client';
 
@@ -250,6 +252,13 @@ function buildLibreOfficePdfConvertToArg(): string {
   return 'pdf:writer_pdf_Export';
 }
 
+/** Профиль LibreOffice: отключает «Применять таблицу замены шрифтов» (иначе Century Gothic → метрический аналог). */
+const LO_NO_FONT_REPLACE_REGISTRY_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<item oor:path="/org.openoffice.Office.Common/Font/Substitution"><prop oor:name="Replacement" oor:op="fuse"><value>false</value></prop></item>
+</oor:items>
+`;
+
 /**
  * Конвертирует Word документ в PDF используя LibreOffice в фоновом режиме (без показа окна/терминала)
  */
@@ -276,68 +285,92 @@ async function convertWordToPDF(wordPath: string, pdfPath: string): Promise<void
     String(process.env.INVOICE_LIBREOFFICE_WRITER_FLAG || '').toLowerCase(),
   );
 
-  // Используем spawn вместо exec для более тихого запуска
-  return new Promise((resolve, reject) => {
-    const args = [
-      '--headless',
-      '--invisible',
-      '--nodefault',
-      '--nolockcheck',
-      '--norestore',
-      ...(writerFlag ? ['--writer'] : []),
-      '--convert-to',
-      convertToArg,
-      '--outdir',
-      outputDir,
-      wordPath,
-    ];
+  const skipCustomProfile = ['1', 'true', 'yes'].includes(
+    String(process.env.INVOICE_LIBREOFFICE_DISABLE_CUSTOM_PROFILE || '').toLowerCase(),
+  );
 
-    const loChild = spawn(libreOfficePath, args, {
-      stdio: ['ignore', 'ignore', 'pipe'],
-      windowsHide: true,
-      detached: false,
-    });
+  let profileRoot: string | null = null;
+  if (!skipCustomProfile) {
+    profileRoot = path.join(path.dirname(wordPath), `lo-prof-${randomUUID()}`);
+    const userDir = path.join(profileRoot, 'user');
+    await fsPromises.mkdir(userDir, { recursive: true });
+    await fsPromises.writeFile(path.join(userDir, 'registrymodifications.xcu'), LO_NO_FONT_REPLACE_REGISTRY_XML, 'utf8');
+    console.log('[invoice] LibreOffice UserInstallation: таблица замены шрифтов отключена');
+  }
 
-    let errorOutput = '';
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const args: string[] = [];
+      if (profileRoot) {
+        args.push(`-env:UserInstallation=${pathToFileURL(profileRoot).href}`);
+      }
+      args.push(
+        '--headless',
+        '--invisible',
+        '--nodefault',
+        '--nolockcheck',
+        '--norestore',
+        ...(writerFlag ? ['--writer'] : []),
+        '--convert-to',
+        convertToArg,
+        '--outdir',
+        outputDir,
+        wordPath,
+      );
 
-    loChild.stderr?.on('data', (data: Buffer) => {
-      errorOutput += data.toString();
-    });
+      const loChild = spawn(libreOfficePath, args, {
+        stdio: ['ignore', 'ignore', 'pipe'],
+        windowsHide: true,
+        detached: false,
+      });
 
-    loChild.on('close', async (code: number) => {
-      setTimeout(async () => {
-        try {
-          await fsPromises.access(generatedPdfPath);
-          if (generatedPdfPath !== pdfPath) {
-            await fsPromises.rename(generatedPdfPath, pdfPath);
-          }
-          console.log('PDF файл успешно создан:', pdfPath);
-          resolve();
-        } catch {
-          const altPath = wordPath.replace(/\.docx?$/i, '.pdf');
+      let errorOutput = '';
+
+      loChild.stderr?.on('data', (data: Buffer) => {
+        errorOutput += data.toString();
+      });
+
+      loChild.on('close', (code: number) => {
+        setTimeout(async () => {
           try {
-            await fsPromises.access(altPath);
-            await fsPromises.rename(altPath, pdfPath);
-            console.log('PDF файл найден по альтернативному пути:', pdfPath);
+            await fsPromises.access(generatedPdfPath);
+            if (generatedPdfPath !== pdfPath) {
+              await fsPromises.rename(generatedPdfPath, pdfPath);
+            }
+            console.log('PDF файл успешно создан:', pdfPath);
             resolve();
           } catch {
-            reject(new Error(`PDF файл не был создан. Код выхода: ${code}. Ошибки: ${errorOutput || 'нет'}`));
+            const altPath = wordPath.replace(/\.docx?$/i, '.pdf');
+            try {
+              await fsPromises.access(altPath);
+              await fsPromises.rename(altPath, pdfPath);
+              console.log('PDF файл найден по альтернативному пути:', pdfPath);
+              resolve();
+            } catch {
+              reject(new Error(`PDF файл не был создан. Код выхода: ${code}. Ошибки: ${errorOutput || 'нет'}`));
+            }
           }
+        }, 1500);
+      });
+
+      loChild.on('error', (error: Error) => {
+        reject(new Error(`Ошибка запуска LibreOffice: ${error.message}`));
+      });
+
+      setTimeout(() => {
+        if (!loChild.killed) {
+          loChild.kill();
+          reject(new Error('Конвертация превысила таймаут (30 секунд)'));
         }
-      }, 1500);
+      }, 30000);
     });
-
-    loChild.on('error', (error: Error) => {
-      reject(new Error(`Ошибка запуска LibreOffice: ${error.message}`));
-    });
-
-    setTimeout(() => {
-      if (!loChild.killed) {
-        loChild.kill();
-        reject(new Error('Конвертация превысила таймаут (30 секунд)'));
-      }
-    }, 30000);
-  });
+  } finally {
+    if (profileRoot) {
+      await fsPromises.rm(profileRoot, { recursive: true, force: true }).catch(() => {
+        /* профиль мог быть занят LO — не критично */
+      });
+    }
+  }
 }
 
 /**
