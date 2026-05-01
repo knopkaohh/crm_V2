@@ -97,6 +97,8 @@ router.get('/', authenticate, async (req, res) => {
           postpayment: true,
         designTakenAt: true,
         designTakenBy: true,
+        designStage: true,
+        designNeedsRevision: true,
         designComments: true,
         description: true,
         createdAt: true,
@@ -194,6 +196,8 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
         postpayment: true,
         designTakenAt: true,
         designTakenBy: true,
+        designStage: true,
+        designNeedsRevision: true,
         designComments: true,
         description: true,
         deliveredAt: true,
@@ -261,6 +265,8 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
             sliderColor: true,
             desiredDeadline: true,
             productionComments: true,
+            productionStartDate: true,
+            productionEndDate: true,
             createdAt: true,
           },
           orderBy: { createdAt: 'asc' },
@@ -627,7 +633,19 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 router.put('/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    const { status, deadline, notes, designComments, takeDesign, designApproved, sendForApproval, description } = req.body;
+    const {
+      status,
+      deadline,
+      notes,
+      designComments,
+      takeDesign,
+      designApproved,
+      sendForApproval,
+      description,
+      source,
+      designStage,
+      designNeedsRevision,
+    } = req.body;
 
     const existingOrder = await prisma.order.findUnique({
       where: { id },
@@ -652,6 +670,9 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
     if (notes !== undefined) updateData.notes = notes;
     if (designComments !== undefined) updateData.designComments = designComments;
     if (description !== undefined) updateData.description = description;
+    if (source !== undefined) updateData.source = source;
+    if (designStage !== undefined) updateData.designStage = designStage;
+    if (designNeedsRevision !== undefined) updateData.designNeedsRevision = Boolean(designNeedsRevision);
     
     // Обработка "Взять в работу"
     if (takeDesign === true) {
@@ -667,6 +688,8 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
     
     // Обработка "Отправить на согласование"
     if (sendForApproval === true && existingOrder.status === 'DESIGN_APPROVAL') {
+      updateData.designStage = 'ON_APPROVAL';
+      updateData.designNeedsRevision = false;
       // Сохраняем комментарии, статус остается DESIGN_APPROVAL
       // Уведомление менеджеру о том, что макет отправлен на согласование
       await sendNotification(
@@ -698,6 +721,12 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
         'order',
         `/orders/${existingOrder.id}`
       );
+    }
+    if (designApproved === true) {
+      updateData.designNeedsRevision = false;
+      if (existingOrder.status === 'DESIGN_APPROVAL' && status === undefined) {
+        updateData.status = 'AWAITING_MATERIALS';
+      }
     }
 
     const order = await prisma.order.update({
@@ -890,6 +919,38 @@ router.post('/:id/comments', authenticate, async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Create comment error:', error);
     res.status(500).json({ error: 'Ошибка при создании комментария' });
+  }
+});
+
+// Удалить заказ
+router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+
+    const existingOrder = await prisma.order.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        managerId: true,
+      },
+    });
+
+    if (!existingOrder) {
+      return res.status(404).json({ error: 'Заказ не найден' });
+    }
+
+    if (req.userRole === 'SALES_MANAGER' && existingOrder.managerId !== req.userId) {
+      return res.status(403).json({ error: 'Недостаточно прав доступа' });
+    }
+
+    await prisma.order.delete({
+      where: { id },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete order error:', error);
+    res.status(500).json({ error: 'Ошибка при удалении заказа' });
   }
 });
 

@@ -48,6 +48,8 @@ interface OrderItem {
   sliderColor?: string | null
   desiredDeadline?: string | null
   productionComments?: string | null
+  productionStartDate?: string | null
+  productionEndDate?: string | null
 }
 
 interface Order {
@@ -59,6 +61,8 @@ interface Order {
   creator?: { id: string; firstName: string; lastName: string }
   designTakenByUser?: { id: string; firstName: string; lastName: string } | null
   designTakenAt?: string | null
+  designStage?: 'IN_DEVELOPMENT' | 'ON_APPROVAL'
+  designNeedsRevision?: boolean
   designComments?: string | null
   description?: string | null
   source?: string | null
@@ -97,7 +101,6 @@ export default function OrderDetailPage() {
   const [uploadingFile, setUploadingFile] = useState(false)
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null)
   const [showProductionModal, setShowProductionModal] = useState(false)
-  const [startedItemsMap, setStartedItemsMap] = useState<Record<string, boolean>>({})
   
   // Режим редактирования
   const [isEditing, setIsEditing] = useState(false)
@@ -123,38 +126,12 @@ export default function OrderDetailPage() {
   useEffect(() => {
     if (order) {
       loadTasks()
-      const savedStages = JSON.parse(localStorage.getItem('orderDesignStageMap') || '{}')
-      if (savedStages[order.id]) {
-        setDesignStage(savedStages[order.id])
-      } else if (order.status === 'DESIGN_APPROVAL') {
-        setDesignStage('IN_DEVELOPMENT')
+      if (order.status === 'DESIGN_APPROVAL') {
+        setDesignStage(order.designStage === 'ON_APPROVAL' ? 'ON_APPROVAL' : 'IN_DEVELOPMENT')
       }
-      const savedStartedItems = JSON.parse(localStorage.getItem(`orderStartedItems:${order.id}`) || '{}')
-      setStartedItemsMap(savedStartedItems)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order])
-
-  const saveDesignStage = (stage: 'IN_DEVELOPMENT' | 'ON_APPROVAL') => {
-    if (!order) return
-    setDesignStage(stage)
-    const savedStages = JSON.parse(localStorage.getItem('orderDesignStageMap') || '{}')
-    savedStages[order.id] = stage
-    localStorage.setItem('orderDesignStageMap', JSON.stringify(savedStages))
-  }
-
-  const saveDesignRevisionFlag = (needsRevision: boolean) => {
-    if (!order) return
-    const savedRevisions = JSON.parse(localStorage.getItem('orderDesignRevisionMap') || '{}')
-    savedRevisions[order.id] = needsRevision
-    localStorage.setItem('orderDesignRevisionMap', JSON.stringify(savedRevisions))
-  }
-
-  const saveStartedItemsMap = (next: Record<string, boolean>) => {
-    if (!order) return
-    setStartedItemsMap(next)
-    localStorage.setItem(`orderStartedItems:${order.id}`, JSON.stringify(next))
-  }
 
   const loadOrder = async () => {
     try {
@@ -233,9 +210,11 @@ export default function OrderDetailPage() {
     try {
       // Сохраняем комментарий и отправляем на согласование
       await api.put(`/orders/${order.id}`, { 
-        sendForApproval: true 
+        sendForApproval: true,
+        designStage: 'ON_APPROVAL',
+        designNeedsRevision: false,
       })
-      saveDesignStage('ON_APPROVAL')
+      setDesignStage('ON_APPROVAL')
       await loadOrder()
     } catch (e) {
       console.error('Failed to send for approval:', e)
@@ -247,7 +226,7 @@ export default function OrderDetailPage() {
     if (!order) return
     try {
       await api.put(`/orders/${order.id}`, { status: 'AWAITING_MATERIALS' })
-      saveDesignRevisionFlag(false)
+      setDesignStage('ON_APPROVAL')
       await loadOrder()
     } catch (e) {
       console.error('Failed to confirm design:', e)
@@ -258,11 +237,8 @@ export default function OrderDetailPage() {
   const handleDesignRevision = async () => {
     if (!order) return
     try {
-      saveDesignStage('IN_DEVELOPMENT')
-      saveDesignRevisionFlag(true)
-      if (order.status !== 'DESIGN_APPROVAL') {
-        await api.put(`/orders/${order.id}`, { status: 'DESIGN_APPROVAL' })
-      }
+      await api.put(`/orders/${order.id}`, { status: 'DESIGN_APPROVAL', designStage: 'IN_DEVELOPMENT', designNeedsRevision: true })
+      setDesignStage('IN_DEVELOPMENT')
       await loadOrder()
     } catch (e) {
       console.error('Failed to return design for revision:', e)
@@ -274,8 +250,6 @@ export default function OrderDetailPage() {
     if (!order) return
     try {
       await api.put(`/orders/${order.id}`, { status: 'IN_PRODUCTION' })
-      localStorage.removeItem(`orderStartedItems:${order.id}`)
-      setStartedItemsMap({})
       await loadOrder()
     } catch (e) {
       console.error('Failed to start order:', e)
@@ -285,13 +259,22 @@ export default function OrderDetailPage() {
 
   const handleItemStarted = async (itemId?: string) => {
     if (!order || !itemId) return
-    if (startedItemsMap[itemId]) return
+    const targetItem = (order.items || []).find((item) => item.id === itemId)
+    if (targetItem?.productionStartDate) return
 
-    const next = { ...startedItemsMap, [itemId]: true }
-    saveStartedItemsMap(next)
+    await api.put(`/orders/${order.id}/items/${itemId}`, {
+      productionStartDate: new Date().toISOString(),
+    })
 
-    const itemIds = (order.items || []).map((item) => item.id).filter(Boolean) as string[]
-    const allStarted = itemIds.length > 0 && itemIds.every((id) => next[id])
+    const refreshed = await api.get(`/orders/${order.id}`, {
+      headers: { 'X-Skip-Cache': '1' },
+    })
+    setOrder(refreshed.data)
+    const itemIds = (refreshed.data.items || []).map((item: OrderItem) => item.id).filter(Boolean) as string[]
+    const allStarted = itemIds.length > 0 && itemIds.every((id) => {
+      const item = (refreshed.data.items || []).find((it: OrderItem) => it.id === id)
+      return Boolean(item?.productionStartDate)
+    })
     if (allStarted) {
       await handleOrderStarted()
     }
@@ -696,9 +679,9 @@ export default function OrderDetailPage() {
                             <button
                               type="button"
                               onClick={() => handleItemStarted(it.id)}
-                              disabled={Boolean(startedItemsMap[it.id])}
+                              disabled={Boolean(it.productionStartDate)}
                               className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${
-                                startedItemsMap[it.id]
+                                it.productionStartDate
                                   ? 'bg-emerald-100 text-emerald-700 border border-emerald-200 cursor-not-allowed'
                                   : 'bg-primary-600 text-white hover:bg-primary-700'
                               }`}

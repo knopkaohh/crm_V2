@@ -99,6 +99,7 @@ model User {
   clientsCreated   Client[]         @relation("ClientCreatedBy")
   projectSalesAsManager ProjectSale[] @relation("ProjectSaleManager")
   projectSalesCreated   ProjectSale[] @relation("ProjectSaleCreator")
+  monthlyManagerPlans   MonthlyManagerPlan[]
 
   @@index([email])
   @@index([role])
@@ -237,6 +238,8 @@ model Order {
   postpayment   Decimal?    // Постоплата (для дробной оплаты)
   designTakenAt DateTime?   // Когда взят в работу дизайнером
   designTakenBy String?     // Кто взял в работу (User ID)
+  designStage   String      @default("IN_DEVELOPMENT") // Стадия внутри DESIGN_APPROVAL
+  designNeedsRevision Boolean @default(false) // Нужны ли правки по макету
   designComments String?    // Комментарии по макету
   description   String?     // Описание заказа
   createdAt     DateTime    @default(now())
@@ -388,6 +391,22 @@ model AppSetting {
   updatedAt DateTime @updatedAt
 
   @@map("app_settings")
+}
+
+model MonthlyManagerPlan {
+  id         String   @id @default(uuid())
+  period     String
+  managerId  String
+  planAmount Decimal
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  manager User @relation(fields: [managerId], references: [id], onDelete: Cascade)
+
+  @@unique([period, managerId])
+  @@index([period])
+  @@index([managerId])
+  @@map("monthly_manager_plans")
 }
 
 // Комментарии (для лидов, заказов и задач)

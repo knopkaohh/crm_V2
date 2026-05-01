@@ -5,6 +5,12 @@ import XLSX from 'xlsx';
 import PDFDocument from 'pdfkit';
 
 const router = express.Router();
+const PERIOD_REGEX = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+const getValidatedPeriod = (raw: unknown) => {
+  if (typeof raw !== 'string' || !PERIOD_REGEX.test(raw)) return null;
+  return raw;
+};
 
 // Получить метрики для дашборда
 router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
@@ -281,6 +287,78 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Get dashboard analytics error:', error);
     res.status(500).json({ error: 'Ошибка при получении аналитики' });
+  }
+});
+
+router.get('/manager-plans', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const period = getValidatedPeriod(req.query.period);
+    if (!period) {
+      return res.status(400).json({ error: 'Некорректный период. Используйте формат YYYY-MM' });
+    }
+
+    const plans = await prisma.monthlyManagerPlan.findMany({
+      where: {
+        period,
+      },
+      select: {
+        managerId: true,
+        planAmount: true,
+      },
+    });
+
+    res.json({
+      period,
+      plans: plans.map((plan) => ({
+        managerId: plan.managerId,
+        planAmount: Number(plan.planAmount),
+      })),
+    });
+  } catch (error) {
+    console.error('Get manager plans error:', error);
+    res.status(500).json({ error: 'Ошибка при получении планов менеджеров' });
+  }
+});
+
+router.post('/manager-plans', authenticate, requireRole('EXECUTIVE', 'ADMIN'), async (req: AuthRequest, res) => {
+  try {
+    const period = getValidatedPeriod(req.body?.period);
+    const plans = Array.isArray(req.body?.plans) ? req.body.plans : null;
+    if (!period || !plans) {
+      return res.status(400).json({ error: 'Передайте period (YYYY-MM) и массив plans' });
+    }
+
+    const normalizedPlans = plans
+      .map((plan: any) => ({
+        managerId: typeof plan?.managerId === 'string' ? plan.managerId : '',
+        planAmount: Number(plan?.planAmount ?? 0),
+      }))
+      .filter((plan: { managerId: string; planAmount: number }) =>
+        Boolean(plan.managerId) && Number.isFinite(plan.planAmount) && plan.planAmount >= 0
+      );
+
+    await prisma.$transaction([
+      prisma.monthlyManagerPlan.deleteMany({ where: { period } }),
+      ...(normalizedPlans.length > 0
+        ? [
+            prisma.monthlyManagerPlan.createMany({
+              data: normalizedPlans.map((plan: { managerId: string; planAmount: number }) => ({
+                period,
+                managerId: plan.managerId,
+                planAmount: plan.planAmount,
+              })),
+            }),
+          ]
+        : []),
+    ]);
+
+    res.json({
+      period,
+      plans: normalizedPlans,
+    });
+  } catch (error) {
+    console.error('Save manager plans error:', error);
+    res.status(500).json({ error: 'Ошибка при сохранении планов менеджеров' });
   }
 });
 

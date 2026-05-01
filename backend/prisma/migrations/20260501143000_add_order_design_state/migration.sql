@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "orders"
+ADD COLUMN "designNeedsRevision" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN "designStage" TEXT NOT NULL DEFAULT 'IN_DEVELOPMENT';

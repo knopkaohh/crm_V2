@@ -87,48 +87,60 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadDashboardData()
-    loadSavedPlans()
   }, [])
 
-  const loadSavedPlans = () => {
-    try {
-      const saved = localStorage.getItem('monthly-manager-plans')
-      if (!saved) return
-      const parsed = JSON.parse(saved) as Record<string, Record<string, number>>
-      setPlansByPeriod(parsed)
-    } catch (error) {
-      console.error('Failed to read manager plans:', error)
-    }
-  }
+  useEffect(() => {
+    loadPlansForPeriod(selectedPeriod)
+  }, [selectedPeriod])
 
-  const savePlan = (name: string, value: number) => {
-    const nextPlansByPeriod = {
-      ...plansByPeriod,
-      [selectedPeriod]: {
-        ...(plansByPeriod[selectedPeriod] ?? {}),
-        [name]: value,
-      },
+  const getManagerPlanKey = (manager: { managerId?: string; name: string }) => manager.managerId || manager.name
+
+  const loadPlansForPeriod = async (period: string) => {
+    try {
+      const response = await api.get('/analytics/manager-plans', { params: { period } })
+      const entries = Array.isArray(response.data?.plans) ? response.data.plans : []
+      const mapped = entries.reduce((acc: Record<string, number>, item: { managerId: string; planAmount: number }) => {
+        acc[item.managerId] = Number(item.planAmount || 0)
+        return acc
+      }, {})
+      setPlansByPeriod((prev) => ({ ...prev, [period]: mapped }))
+    } catch (error) {
+      console.error('Failed to load manager plans:', error)
+      setPlansByPeriod((prev) => ({ ...prev, [period]: prev[period] ?? {} }))
     }
-    setPlansByPeriod(nextPlansByPeriod)
-    localStorage.setItem('monthly-manager-plans', JSON.stringify(nextPlansByPeriod))
   }
 
   const openPlanModal = () => {
     const initialDrafts: Record<string, number> = {}
     managerRows.forEach((manager) => {
-      initialDrafts[manager.name] = plansForPeriod[manager.name] ?? defaultPlanForManager(manager.name)
+      const key = getManagerPlanKey(manager)
+      initialDrafts[key] = plansForPeriod[key] ?? defaultPlanForManager(manager.name)
     })
     setDraftPlans(initialDrafts)
     setIsPlanModalOpen(true)
   }
 
-  const applyDraftPlans = () => {
+  const applyDraftPlans = async () => {
+    const payloadPlans = managerRows
+      .filter((manager) => Boolean(manager.managerId))
+      .map((manager) => {
+        const key = getManagerPlanKey(manager)
+        return {
+          managerId: manager.managerId as string,
+          planAmount: Number(draftPlans[key] ?? 0),
+        }
+      })
+
+    await api.post('/analytics/manager-plans', {
+      period: selectedPeriod,
+      plans: payloadPlans,
+    })
+
     const nextPlansByPeriod = {
       ...plansByPeriod,
       [selectedPeriod]: draftPlans,
     }
     setPlansByPeriod(nextPlansByPeriod)
-    localStorage.setItem('monthly-manager-plans', JSON.stringify(nextPlansByPeriod))
     setIsPlanModalOpen(false)
   }
 
@@ -162,20 +174,30 @@ export default function DashboardPage() {
 
   const managerRows = useMemo(() => {
     const managerRevenueFromApi = data?.currentMonth.managerRevenue ?? []
-    const apiByName = managerRevenueFromApi.reduce((acc, manager) => {
-      acc[manager.name] = manager
+    const apiByManagerId = managerRevenueFromApi.reduce((acc, manager) => {
+      acc[manager.managerId] = manager
       return acc
     }, {} as Record<string, (typeof managerRevenueFromApi)[number]>)
 
     const baseRows = MANAGERS.map((manager) => {
-      const apiManager = apiByName[manager.name]
+      const apiManager = Object.values(apiByManagerId).find((item) => item.name === manager.name)
       const assemblyRevenue = apiManager?.assemblyRevenue ?? manager.assemblyRevenue
       const packageRevenue = apiManager?.packageRevenue ?? manager.packageRevenue
       const salesRevenue = assemblyRevenue + packageRevenue
       const revenue = salesRevenue
-      const plan = plansForPeriod[manager.name] ?? defaultPlanForManager(manager.name)
+      const key = getManagerPlanKey({ managerId: apiManager?.managerId, name: manager.name })
+      const plan = plansForPeriod[key] ?? defaultPlanForManager(manager.name)
       const percent = plan > 0 ? Number(((revenue / plan) * 100).toFixed(2)) : 0
-      return { ...manager, assemblyRevenue, packageRevenue, salesRevenue, revenue, plan, percent }
+      return {
+        ...manager,
+        managerId: apiManager?.managerId,
+        assemblyRevenue,
+        packageRevenue,
+        salesRevenue,
+        revenue,
+        plan,
+        percent,
+      }
     })
 
     const knownNames = new Set(MANAGERS.map((manager) => manager.name))
@@ -183,7 +205,7 @@ export default function DashboardPage() {
       .filter((manager) => !knownNames.has(manager.name))
       .map((manager) => {
         const salesRevenue = manager.assemblyRevenue + manager.packageRevenue
-        const plan = plansForPeriod[manager.name] ?? defaultPlanForManager(manager.name)
+        const plan = plansForPeriod[manager.managerId] ?? defaultPlanForManager(manager.name)
         const percent = plan > 0 ? Number(((salesRevenue / plan) * 100).toFixed(2)) : 0
         return {
           managerId: manager.managerId,
@@ -386,18 +408,18 @@ export default function DashboardPage() {
               <h3 className="text-lg font-semibold text-gray-900">Назначить план на {selectedPeriod}</h3>
             </div>
             <div className="p-5 space-y-3 max-h-[65vh] overflow-y-auto">
-              {MANAGERS.map((manager) => (
+              {managerRows.map((manager) => (
                 <div key={manager.name} className="grid grid-cols-2 items-center gap-3">
                   <p className="text-sm text-gray-700">{manager.name}</p>
                   <input
                     type="number"
                     min={0}
                     step={50000}
-                    value={draftPlans[manager.name] ?? 0}
+                    value={draftPlans[getManagerPlanKey(manager)] ?? 0}
                     onChange={(event) =>
                       setDraftPlans((prev) => ({
                         ...prev,
-                        [manager.name]: Number(event.target.value || 0),
+                        [getManagerPlanKey(manager)]: Number(event.target.value || 0),
                       }))
                     }
                     className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-right"

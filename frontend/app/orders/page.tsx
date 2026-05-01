@@ -31,6 +31,8 @@ interface Order {
   source?: string
   designTakenAt?: string | null
   designTakenBy?: string | null
+  designStage?: 'IN_DEVELOPMENT' | 'ON_APPROVAL'
+  designNeedsRevision?: boolean
   items: Array<{
     id: string
     name: string
@@ -65,7 +67,6 @@ const statusColors: Record<string, string> = {
 }
 
 export default function OrdersPage() {
-  type DesignStage = 'IN_DEVELOPMENT' | 'ON_APPROVAL'
   const router = useRouter()
   const searchParams = useSearchParams()
   const initialStatusFilter = searchParams.get('status') ?? ''
@@ -76,8 +77,6 @@ export default function OrdersPage() {
   const [statusFilter, setStatusFilter] = useState<string>(initialStatusFilter)
   const [draggedOrder, setDraggedOrder] = useState<string | null>(null)
   const [dragOverStatus, setDragOverStatus] = useState<string | null>(null)
-  const [designStageMap, setDesignStageMap] = useState<Record<string, DesignStage>>({})
-  const [designRevisionMap, setDesignRevisionMap] = useState<Record<string, boolean>>({})
 
   const loadOrders = useCallback(async () => {
     try {
@@ -99,11 +98,7 @@ export default function OrdersPage() {
         ordersData = []
       }
       
-      // Filter out "deleted" orders (stored in localStorage)
-      const deletedIds = JSON.parse(localStorage.getItem('deletedOrders') || '[]')
-      const filteredOrders = ordersData.filter((order: Order) => !deletedIds.includes(order.id))
-      
-      setOrders(filteredOrders)
+      setOrders(ordersData)
     } catch (error) {
       console.error('Failed to load orders:', error)
       console.error('Error details:', error)
@@ -125,31 +120,9 @@ export default function OrdersPage() {
     setStatusFilter((prev) => (prev === statusParam ? prev : statusParam))
   }, [searchParams])
 
-  useEffect(() => {
-    const savedStages = localStorage.getItem('orderDesignStageMap')
-    const savedRevisions = localStorage.getItem('orderDesignRevisionMap')
-    if (savedStages) setDesignStageMap(JSON.parse(savedStages))
-    if (savedRevisions) setDesignRevisionMap(JSON.parse(savedRevisions))
-  }, [])
-
-  const getDesignStage = useCallback((orderId: string): DesignStage => {
-    return designStageMap[orderId] || 'IN_DEVELOPMENT'
-  }, [designStageMap])
-
-  const setDesignStage = useCallback((orderId: string, stage: DesignStage) => {
-    setDesignStageMap((prev) => {
-      const next = { ...prev, [orderId]: stage }
-      localStorage.setItem('orderDesignStageMap', JSON.stringify(next))
-      return next
-    })
-  }, [])
-
-  const setDesignNeedsRevision = useCallback((orderId: string, needsRevision: boolean) => {
-    setDesignRevisionMap((prev) => {
-      const next = { ...prev, [orderId]: needsRevision }
-      localStorage.setItem('orderDesignRevisionMap', JSON.stringify(next))
-      return next
-    })
+  const getDesignStage = useCallback((order: Order): 'IN_DEVELOPMENT' | 'ON_APPROVAL' => {
+    const stage = order.designStage
+    return stage === 'ON_APPROVAL' ? 'ON_APPROVAL' : 'IN_DEVELOPMENT'
   }, [])
 
   const handleDragStart = useCallback((e: React.DragEvent, orderId: string) => {
@@ -188,8 +161,8 @@ export default function OrdersPage() {
       order.status === targetStatus &&
       !(
         targetStatus === 'DESIGN_APPROVAL' &&
-        ((newStatus === 'DESIGN_IN_DEVELOPMENT' && getDesignStage(order.id) !== 'IN_DEVELOPMENT') ||
-          (newStatus === 'DESIGN_ON_APPROVAL' && getDesignStage(order.id) !== 'ON_APPROVAL'))
+        ((newStatus === 'DESIGN_IN_DEVELOPMENT' && getDesignStage(order) !== 'IN_DEVELOPMENT') ||
+          (newStatus === 'DESIGN_ON_APPROVAL' && getDesignStage(order) !== 'ON_APPROVAL'))
       )
     ) {
       setDraggedOrder(null)
@@ -203,17 +176,28 @@ export default function OrdersPage() {
         o.id === draggedOrder ? { ...o, status: targetStatus } : o
       )
     )
-    if (targetStatus === 'DESIGN_APPROVAL') {
-      if (newStatus === 'DESIGN_ON_APPROVAL') {
-        setDesignStage(order.id, 'ON_APPROVAL')
-        setDesignNeedsRevision(order.id, false)
-      }
-      if (newStatus === 'DESIGN_IN_DEVELOPMENT') setDesignStage(order.id, 'IN_DEVELOPMENT')
-    }
+    const nextDesignStage =
+      targetStatus === 'DESIGN_APPROVAL'
+        ? newStatus === 'DESIGN_ON_APPROVAL'
+          ? 'ON_APPROVAL'
+          : 'IN_DEVELOPMENT'
+        : order.designStage
+    const nextDesignNeedsRevision =
+      targetStatus === 'DESIGN_APPROVAL' && newStatus === 'DESIGN_ON_APPROVAL'
+        ? false
+        : order.designNeedsRevision
+    setOrders((prevOrders) =>
+      prevOrders.map((o) =>
+        o.id === draggedOrder ? { ...o, status: targetStatus, designStage: nextDesignStage, designNeedsRevision: nextDesignNeedsRevision } : o
+      )
+    )
     setDraggedOrder(null)
 
     try {
-      await api.put(`/orders/${draggedOrder}`, { status: targetStatus })
+      await api.put(`/orders/${draggedOrder}`, {
+        status: targetStatus,
+        ...(targetStatus === 'DESIGN_APPROVAL' ? { designStage: nextDesignStage, designNeedsRevision: nextDesignNeedsRevision } : {}),
+      })
       // Успешно обновлено - состояние уже обновлено оптимистично
     } catch (error) {
       console.error('Failed to update order status:', error)
@@ -223,9 +207,6 @@ export default function OrdersPage() {
           o.id === draggedOrder ? { ...o, status: previousStatus } : o
         )
       )
-      if (targetStatus === 'DESIGN_APPROVAL') {
-        setDesignStage(order.id, getDesignStage(order.id))
-      }
       alert('Ошибка при изменении статуса заказа')
     }
   }
@@ -235,7 +216,7 @@ export default function OrdersPage() {
 
     // Индикатор только по стадии заказа (без "магии" от побочных флагов).
     if (order.status === 'NEW_ORDER') return { border: 'border-l-blue-400', bg: 'bg-blue-50/40' }
-    if (order.status === 'DESIGN_APPROVAL' && designRevisionMap[order.id]) return { border: 'border-l-red-500', bg: 'bg-red-50/50' }
+    if (order.status === 'DESIGN_APPROVAL' && order.designNeedsRevision) return { border: 'border-l-red-500', bg: 'bg-red-50/50' }
     if (order.status === 'DESIGN_APPROVAL') return { border: 'border-l-yellow-400', bg: 'bg-yellow-50/40' }
     if (order.status === 'AWAITING_MATERIALS') return { border: 'border-l-orange-400', bg: 'bg-orange-50/40' }
     if (order.status === 'IN_PRODUCTION') {
@@ -322,11 +303,13 @@ export default function OrdersPage() {
     setOrders((prevOrders) =>
       prevOrders.map((o) => (o.id === orderId ? { ...o, status: 'AWAITING_MATERIALS' } : o))
     )
-    setDesignNeedsRevision(orderId, false)
+    setOrders((prevOrders) =>
+      prevOrders.map((o) => (o.id === orderId ? { ...o, designNeedsRevision: false, designStage: 'ON_APPROVAL' } : o))
+    )
     
     try {
       // Фиксируем утверждение и переводим в "Готовы к запуску"
-      await api.put(`/orders/${orderId}`, { designApproved: true, status: 'AWAITING_MATERIALS' })
+      await api.put(`/orders/${orderId}`, { designApproved: true, status: 'AWAITING_MATERIALS', designNeedsRevision: false })
       // Успешно обновлено
     } catch (error) {
       console.error('Failed to approve design:', error)
@@ -520,9 +503,9 @@ export default function OrdersPage() {
           {columns.map(({ key: status, label }) => {
             const statusOrders =
               status === 'DESIGN_IN_DEVELOPMENT'
-                ? (groupedOrders.DESIGN_APPROVAL || []).filter((o) => getDesignStage(o.id) === 'IN_DEVELOPMENT')
+                ? (groupedOrders.DESIGN_APPROVAL || []).filter((o) => getDesignStage(o) === 'IN_DEVELOPMENT')
                 : status === 'DESIGN_ON_APPROVAL'
-                  ? (groupedOrders.DESIGN_APPROVAL || []).filter((o) => getDesignStage(o.id) === 'ON_APPROVAL')
+                  ? (groupedOrders.DESIGN_APPROVAL || []).filter((o) => getDesignStage(o) === 'ON_APPROVAL')
                   : (groupedOrders[status] || [])
             return (
               <div
@@ -617,18 +600,20 @@ export default function OrdersPage() {
                       )}
                       
                       {/* Отправить на согласование: только в колонке "Макеты в разработку" */}
-                      {order.status === 'DESIGN_APPROVAL' && getDesignStage(order.id) === 'IN_DEVELOPMENT' && (
+                      {order.status === 'DESIGN_APPROVAL' && getDesignStage(order) === 'IN_DEVELOPMENT' && (
                         <div className="mt-3 pt-3 border-t border-gray-200">
                           <button
                             onClick={async (e) => {
                               e.stopPropagation()
-                              setDesignStage(order.id, 'ON_APPROVAL')
-                              setDesignNeedsRevision(order.id, false)
+                              setOrders((prevOrders) =>
+                                prevOrders.map((o) => (o.id === order.id ? { ...o, designStage: 'ON_APPROVAL', designNeedsRevision: false } : o))
+                              )
                               try {
-                                await api.put(`/orders/${order.id}`, { sendForApproval: true })
+                                await api.put(`/orders/${order.id}`, { sendForApproval: true, designStage: 'ON_APPROVAL', designNeedsRevision: false })
                               } catch (error) {
-                                setDesignStage(order.id, 'IN_DEVELOPMENT')
-                                setDesignNeedsRevision(order.id, true)
+                                setOrders((prevOrders) =>
+                                  prevOrders.map((o) => (o.id === order.id ? { ...o, designStage: 'IN_DEVELOPMENT', designNeedsRevision: true } : o))
+                                )
                                 console.error('Failed to send for approval:', error)
                                 alert('Ошибка при отправке на согласование')
                               }
@@ -641,7 +626,7 @@ export default function OrdersPage() {
                       )}
 
                       {/* На согласовании: согласовать или вернуть на правки */}
-                      {order.status === 'DESIGN_APPROVAL' && getDesignStage(order.id) === 'ON_APPROVAL' && (
+                      {order.status === 'DESIGN_APPROVAL' && getDesignStage(order) === 'ON_APPROVAL' && (
                         <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
                           <button
                             onClick={(e) => handleDesignApproved(order.id, e)}
@@ -652,8 +637,10 @@ export default function OrdersPage() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation()
-                              setDesignStage(order.id, 'IN_DEVELOPMENT')
-                              setDesignNeedsRevision(order.id, true)
+                              setOrders((prevOrders) =>
+                                prevOrders.map((o) => (o.id === order.id ? { ...o, designStage: 'IN_DEVELOPMENT', designNeedsRevision: true } : o))
+                              )
+                              api.put(`/orders/${order.id}`, { designStage: 'IN_DEVELOPMENT', designNeedsRevision: true }).catch(() => null)
                             }}
                             className="w-full px-3 py-2 text-xs border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors font-medium"
                           >
@@ -707,23 +694,11 @@ export default function OrdersPage() {
                               // Try DELETE first
                               api.delete(`/orders/${order.id}`)
                                 .then(() => {
-                                  // Save deleted ID to localStorage
-                                  const deletedIds = JSON.parse(localStorage.getItem('deletedOrders') || '[]')
-                                  deletedIds.push(order.id)
-                                  localStorage.setItem('deletedOrders', JSON.stringify(deletedIds))
                                   setOrders((prev) => prev.filter((o) => o.id !== order.id))
                                 })
                                 .catch((err) => {
-                                  if (err?.response?.status === 404 || err?.response?.status === 405) {
-                                    // If DELETE not supported, just mark as deleted locally
-                                    const deletedIds = JSON.parse(localStorage.getItem('deletedOrders') || '[]')
-                                    deletedIds.push(order.id)
-                                    localStorage.setItem('deletedOrders', JSON.stringify(deletedIds))
-                                    setOrders((prev) => prev.filter((o) => o.id !== order.id))
-                                  } else {
-                                    const msg = err?.response?.data?.error || err?.message || 'Не удалось удалить заказ'
-                                    alert(msg)
-                                  }
+                                  const msg = err?.response?.data?.error || err?.message || 'Не удалось удалить заказ'
+                                  alert(msg)
                                 })
                             }
                           }}

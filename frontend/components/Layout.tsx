@@ -114,11 +114,6 @@ export default function Layout({ children }: LayoutProps) {
     const loadTodayContacts = async () => {
       if (!user || user.role !== 'SALES_MANAGER') return
 
-      // Проверяем, показывали ли уже модальное окно сегодня
-      const today = new Date().toDateString()
-      const lastShown = localStorage.getItem('todayContactsModalShown')
-      if (lastShown === today) return
-
       setLoadingTodayContacts(true)
       try {
         // Загружаем задачи на сегодня, связанные с лидами
@@ -156,7 +151,6 @@ export default function Layout({ children }: LayoutProps) {
           // Показываем модальное окно только если есть контакты
           if (contactsList.length > 0) {
             setShowTodayContactsModal(true)
-            localStorage.setItem('todayContactsModalShown', today)
           }
         }
       } catch (error) {
