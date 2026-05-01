@@ -7,7 +7,7 @@ import { NotificationListener } from '@/components/NotificationListener'
 const inter = Inter({ subsets: ['latin', 'cyrillic'] })
 
 export const viewport: Viewport = {
-  themeColor: '#2563eb',
+  themeColor: '#333333',
   width: 'device-width',
   initialScale: 1,
 }
