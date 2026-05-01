@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Env / secrets (never commit)
+.env
+.env.*
+!.env.example
+!.env.local.example
+
+# Google Cloud service accounts / keys (GitHub push protection)
+**/birka-market-crm-holdphones*.json
+*service-account*.json
+**/google-service-account*.json
+
+# Local credentials lists (do not publish)
+USERS_CREDENTIALS.md
+
+# Builds / caches
+frontend/.next/
+frontend/out/
+backend/dist/
+*.tsbuildinfo
+
+# Uploads / runtime (if appear under repo)
+backend/uploads/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

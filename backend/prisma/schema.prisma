@@ -1,0 +1,546 @@
+// Prisma Schema для CRM Birka Market
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Роли пользователей
+enum UserRole {
+  SALES_MANAGER
+  CLIENT_MANAGER
+  TECHNOLOGIST
+  EXECUTIVE
+  ADMIN
+  VAN_DAM_TERMINATOR
+}
+
+enum LeadStatus {
+  NEW_LEAD           // Новый лид
+  CONSIDERING        // Рассмотрение
+  MOVED_TO_WHATSAPP  // Перешел в WhatsApp
+  ORDER_PLACED       // Заказ размещен
+  NOT_OUR_CLIENT     // Не наш клиент
+}
+
+enum OrderStatus {
+  NEW_ORDER           // Новый заказ
+  DESIGN_APPROVAL     // Утверждение дизайна
+  AWAITING_MATERIALS  // Ожидание материалов
+  IN_PRODUCTION       // В производстве
+  ORDER_READY         // Заказ готов
+  ORDER_DELIVERED     // Заказ доставлен
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum CallStatus {
+  NO_ANSWER          // Недозвон
+  WILL_ORDER         // Оформит заказ
+  HOT_CONTACT        // Горячий контакт
+  REPLACEMENT        // Замена
+  NOT_OUR_CLIENT     // Не наш клиент
+  CONVERTED_TO_LEAD  // Конвертирован в лид/контакт
+}
+
+// Этапы воронки «Проектные продажи»
+enum ProjectSaleStage {
+  NEW_BRANDS      // Новые бренды
+  IN_PROGRESS     // Бренды в работе
+  INTERESTED      // Заинтересованные
+  NOT_OUR_CLIENT  // Не наши клиенты
+  ORDER_PLACED    // Оформили заказ
+}
+
+// Пользователи системы
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  password      String
+  firstName     String
+  lastName      String
+  phone         String?
+  role          UserRole @default(SALES_MANAGER)
+  secondaryRoles UserRole[] @default([])  // Дополнительные роли (например, Менеджер по продажам)
+  isActive      Boolean  @default(true)
+  // Интеграция с Telegram
+  telegramChatId String?  // ID чата пользователя с Telegram-ботом
+  telegramUsername String? // username пользователя в Telegram (для информации)
+  telegramNotificationsEnabled Boolean @default(true) // Разрешена ли отправка уведомлений в Telegram
+  notificationSettings Json?  // Настройки уведомлений в формате JSON
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Отношения
+  createdLeads     Lead[]       @relation("LeadCreator")
+  assignedLeads     Lead[]       @relation("LeadManager")
+  createdOrders    Order[]      @relation("OrderCreator")
+  assignedOrders   Order[]      @relation("OrderManager")
+  designOrders     Order[]      @relation("OrderDesigner")
+  createdTasks     Task[]       @relation("TaskCreator")
+  assignedTasks    Task[]       @relation("TaskAssignee")
+  createdCalls     Call[]
+  assignedCalls    Call[]       @relation("CallAssignedManager")
+  comments         Comment[]
+  notifications    Notification[]
+  avitoAccounts    AvitoAccount[]
+  chats            Chat[]
+  chatMessages     ChatMessage[]
+  messageTemplates MessageTemplate[]
+  closedContacts   ClosedContact[] @relation("UserClosedContacts")
+  clientsCreated   Client[]         @relation("ClientCreatedBy")
+  projectSalesAsManager ProjectSale[] @relation("ProjectSaleManager")
+  projectSalesCreated   ProjectSale[] @relation("ProjectSaleCreator")
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+// Клиенты
+model Client {
+  id              String   @id @default(uuid())
+  name            String
+  company         String?
+  email           String?
+  phone           String
+  whatsapp        String?
+  address         String?
+  notes           String?
+  contactMethod   String?  // Способ связи: Telegram, WhatsApp, MAX, Почта
+  telegram        String?  // Username в Telegram (с @ или без)
+  createdById     String?  // Кто создал карточку клиента в CRM
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Отношения
+  createdBy     User?    @relation("ClientCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  leads         Lead[]
+  orders        Order[]
+  calls         Call[]
+  chats         Chat[]
+  closedContacts ClosedContact[] @relation("ClientClosedContacts")
+  projectSales   ProjectSale[]
+
+  @@index([name])
+  @@index([phone])
+  // Составные индексы для оптимизации поиска
+  @@index([name, phone])
+  @@index([createdAt])
+  @@index([createdById])
+  @@map("clients")
+}
+
+// Карточки воронки «Проектные продажи» (бренд + ответственный)
+model ProjectSale {
+  id          String           @id @default(uuid())
+  clientId    String
+  managerId   String
+  stage       ProjectSaleStage @default(NEW_BRANDS)
+  createdById String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  client    Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  manager   User   @relation("ProjectSaleManager", fields: [managerId], references: [id])
+  createdBy User?  @relation("ProjectSaleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([managerId])
+  @@index([stage])
+  @@index([clientId])
+  @@index([createdAt])
+  @@map("project_sales")
+}
+
+// Лиды (продажи)
+model Lead {
+  id              String     @id @default(uuid())
+  clientId        String
+  status          LeadStatus @default(NEW_LEAD)
+  managerId       String     // Менеджер, отвечающий за лид
+  creatorId       String
+  value           Decimal?   // Потенциальная стоимость
+  description     String?
+  source          String?    // Источник лида
+  deadline        DateTime?
+  nextContactDate DateTime?  // Дата следующего контакта с клиентом
+  convertedAt     DateTime?  // Когда переведен в заказ
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  // Отношения
+  client        Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  manager       User       @relation("LeadManager", fields: [managerId], references: [id])
+  creator       User       @relation("LeadCreator", fields: [creatorId], references: [id])
+  comments      Comment[]
+  files         File[]
+  chat          Chat?
+  tasks         Task[]
+  closedContacts ClosedContact[]
+
+  @@index([status])
+  @@index([managerId])
+  @@index([clientId])
+  @@index([nextContactDate])
+  // Составные индексы для оптимизации сложных запросов
+  @@index([status, managerId])
+  @@index([nextContactDate, managerId])
+  @@index([clientId, createdAt])
+  @@map("leads")
+}
+
+model ClosedContact {
+  id          String   @id @default(uuid())
+  leadId      String?
+  clientId    String?
+  managerId   String?
+  clientName  String
+  clientPhone String?
+  source      String?
+  reason      String
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  client Client? @relation("ClientClosedContacts", fields: [clientId], references: [id], onDelete: SetNull)
+  manager User?  @relation("UserClosedContacts", fields: [managerId], references: [id], onDelete: SetNull)
+  lead    Lead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([clientId])
+  @@index([managerId])
+  @@index([leadId])
+  @@map("closed_contacts")
+}
+
+// Заказы
+model Order {
+  id            String      @id @default(uuid())
+  clientId      String
+  status        OrderStatus @default(NEW_ORDER)
+  managerId     String      // Менеджер по продажам
+  creatorId     String
+  orderNumber   String      @unique // Номер заказа
+  totalAmount   Decimal
+  deadline      DateTime?
+  deliveredAt   DateTime?
+  notes         String?
+  source        String?     // Источник заказа (Avito, Сайт и т.д.)
+  paymentType   String?     // Форма оплаты: TRANSFER, INVOICE, CASH, PARTIAL
+  prepayment    Decimal?    // Предоплата (для дробной оплаты)
+  postpayment   Decimal?    // Постоплата (для дробной оплаты)
+  designTakenAt DateTime?   // Когда взят в работу дизайнером
+  designTakenBy String?     // Кто взял в работу (User ID)
+  designComments String?    // Комментарии по макету
+  description   String?     // Описание заказа
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // Отношения
+  client        Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  manager       User        @relation("OrderManager", fields: [managerId], references: [id])
+  creator       User        @relation("OrderCreator", fields: [creatorId], references: [id])
+  designTakenByUser User?   @relation("OrderDesigner", fields: [designTakenBy], references: [id])
+  items         OrderItem[]
+  comments      Comment[]
+  files         File[]
+  tasks         Task[]
+
+  @@index([status])
+  @@index([managerId])
+  @@index([clientId])
+  @@index([orderNumber])
+  @@index([designTakenBy])
+  // Составные индексы для оптимизации сложных запросов
+  @@index([status, managerId])
+  @@index([clientId, createdAt])
+  @@index([createdAt, status])
+  @@index([designTakenBy, status])
+  @@map("orders")
+}
+
+// Позиции заказа (многоэлементные заказы)
+model OrderItem {
+  id          String   @id @default(uuid())
+  orderId    String
+  name       String   // Название позиции
+  quantity   Int
+  price      Decimal
+  notes      String?
+  
+  // Параметры производства
+  material   String?  // Материал (для определения типа формы)
+  designCount Int?    // Кол-во макетов
+  
+  // Для Сатин, Силикон, Хлопок, Жаккард
+  baseColor  String?  // Цвет основы
+  baseColorCustom String? // Цвет основы (цветной - вручную)
+  printColor String?  // Цвет печати
+  printColorCustom String? // Цвет печати (цветной - вручную)
+  cutting    String?  // Резка: Да/Нет
+  centerFold String?  // Подгибка по центру (для жаккарда): Да/Нет
+  freeEdge   String?  // Свободный край (для жаккарда): Да/Нет
+  
+  // Для Картона
+  postProcessing String? // Постобработка: Скругление углов, Биговка (может быть несколько через запятую)
+  coating        String? // Покрытие: Оффсет, Soft-touch, Фольгирование, Кашировка, Высокая печать (может быть несколько через запятую)
+  singleSidedPrint Boolean? // Односторонняя печать
+  doubleSidedPrint Boolean? // Двухсторонняя печать
+  
+  // Для ZIP-Lock пакет
+  density        String? // Плотность: 120мкм, 140мкм
+  bagColor       String? // Цвет пакета: Белый, Черный
+  sliderColor    String? // Цвет бегунка: Белый, Черный
+  
+  desiredDeadline DateTime? // Желаемый срок
+  productionComments String? // Комментарии
+  
+  productionStartDate DateTime? // Дата начала производства
+  productionEndDate   DateTime? // Дата окончания производства
+  
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Отношения
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+// Задачи
+model Task {
+  id          String     @id @default(uuid())
+  title       String
+  description String?
+  status      TaskStatus @default(PENDING)
+  priority    Int        @default(0) // 0 - низкая, 1 - средняя, 2 - высокая
+  creatorId   String
+  assigneeId  String?
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Связь с сущностями (опционально)
+  leadId      String?
+  orderId     String?
+
+  // Отношения
+  creator     User      @relation("TaskCreator", fields: [creatorId], references: [id])
+  assignee     User?     @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  lead         Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  order        Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  comments     Comment[]
+
+  @@index([status])
+  @@index([assigneeId])
+  @@index([creatorId])
+  @@index([dueDate])
+  @@map("tasks")
+}
+
+// Холодные звонки
+model Call {
+  id          String     @id @default(uuid())
+  clientId    String?
+  phoneNumber String     // Номер для звонка
+  status      CallStatus @default(NO_ANSWER)
+  userId      String     // Кто создал запись
+  assignedManagerId String? // Кто нажал "Позвонить"
+  source      String?
+  phoneReceivedAt DateTime? // Дата поступления телефона из источника
+  duration    Int?       // Длительность в секундах
+  notes       String?
+  callComment String?    // Комментарий после звонка
+  callbackAt  DateTime?  // Когда перезвонить
+  noAnswerCount Int      @default(0)
+  closedAt    DateTime?
+  closedReason String?
+  lastStatusAt DateTime?
+  convertedToLeadId String? // Если переведен в лид
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Отношения
+  client      Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  user        User       @relation(fields: [userId], references: [id])
+  assignedManager User?  @relation("CallAssignedManager", fields: [assignedManagerId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([userId])
+  @@index([assignedManagerId])
+  @@index([clientId])
+  @@index([phoneReceivedAt])
+  @@map("calls")
+}
+
+// Системные настройки и курсоры синхронизации
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
+// Комментарии (для лидов, заказов и задач)
+model Comment {
+  id          String   @id @default(uuid())
+  content     String
+  userId      String
+  leadId      String?
+  orderId     String?
+  taskId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Отношения
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  order       Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  task        Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@index([orderId])
+  @@index([taskId])
+  @@map("comments")
+}
+
+// Файлы (дизайны, этикетки и т.д.)
+model File {
+  id          String   @id @default(uuid())
+  filename    String
+  originalName String
+  mimeType    String
+  size        Int       // Размер в байтах
+  path        String   // Путь к файлу
+  leadId      String?
+  orderId     String?
+  uploadedBy  String   // User ID
+  createdAt   DateTime @default(now())
+
+  // Отношения
+  lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  order       Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@index([orderId])
+  @@map("files")
+}
+
+// Уведомления
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  title       String
+  message     String
+  type        String   // 'task', 'order', 'lead', 'general'
+  read        Boolean  @default(false)
+  link        String?  // Ссылка на связанную сущность
+  createdAt   DateTime @default(now())
+
+  // Отношения
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
+  @@map("notifications")
+}
+
+// Интеграция Avito
+// Аккаунты Avito для каждого пользователя
+model AvitoAccount {
+  id            String   @id @default(uuid())
+  userId        String   // Владелец аккаунта
+  accountName   String   // Название аккаунта (для идентификации)
+  clientId      String   // Client ID от Avito
+  clientSecret  String   // Client Secret от Avito (зашифрован)
+  accessToken   String?  // Токен доступа
+  refreshToken  String?  // Токен обновления
+  expiresAt     DateTime? // Когда истекает токен
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Отношения
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chats         Chat[]
+
+  @@index([userId])
+  @@map("avito_accounts")
+}
+
+// Чаты с клиентами через Avito или внутренние чаты для лидов
+model Chat {
+  id              String   @id @default(uuid())
+  avitoAccountId  String?  // Аккаунт Avito, через который идет чат (опционально для внутренних чатов)
+  userId          String   // Менеджер, который ведет чат
+  clientId        String?  // Клиент из CRM (если связан)
+  avitoChatId     String?  // ID чата в Avito (опционально для внутренних чатов)
+  avitoUserId     String?  // ID пользователя Avito (клиент)
+  userName        String?  // Имя клиента из Avito
+  userPhone       String?  // Телефон клиента из Avito
+  lastMessageAt   DateTime? // Время последнего сообщения
+  unreadCount     Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Отношения
+  avitoAccount    AvitoAccount? @relation(fields: [avitoAccountId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client          Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  messages        ChatMessage[]
+  lead            Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  leadId          String?      @unique
+
+  @@index([userId])
+  @@index([avitoAccountId])
+  @@index([clientId])
+  @@index([leadId])
+  @@map("chats")
+}
+
+// Сообщения в чатах
+model ChatMessage {
+  id          String   @id @default(uuid())
+  chatId      String
+  userId      String?  // Пользователь CRM, отправивший сообщение (null если от клиента)
+  messageId   String?  // ID сообщения в Avito (опционально для внутренних сообщений)
+  content     String?  // Текст сообщения
+  imageUrl    String?  // URL изображения
+  imagePath   String?  // Путь к изображению на сервере
+  isOutgoing  Boolean  // true - исходящее, false - входящее
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Отношения
+  chat        Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([chatId])
+  @@index([createdAt])
+  @@map("chat_messages")
+}
+
+// Шаблоны сообщений для быстрой отправки
+model MessageTemplate {
+  id          String   @id @default(uuid())
+  userId      String
+  name        String   // Название шаблона
+  content     String   // Текст шаблона
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Отношения
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("message_templates")
+}
