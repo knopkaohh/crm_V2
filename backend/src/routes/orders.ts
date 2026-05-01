@@ -1,4 +1,5 @@
 import express from 'express';
+import { Prisma } from '@prisma/client';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { sendNotification, broadcastOrderUpdate, broadcastLeadUpdate } from '../utils/socket';
 import { generateInvoicePDF } from '../utils/generate-invoice';
@@ -680,6 +681,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
       designStage,
       designNeedsRevision,
       items: itemsPayload,
+      orderNumber: bodyOrderNumber,
     } = req.body;
 
     const existingOrder = await prisma.order.findUnique({
@@ -708,7 +710,27 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
     if (source !== undefined) updateData.source = source;
     if (designStage !== undefined) updateData.designStage = designStage;
     if (designNeedsRevision !== undefined) updateData.designNeedsRevision = Boolean(designNeedsRevision);
-    
+
+    if (bodyOrderNumber !== undefined && bodyOrderNumber !== null) {
+      const nextNum = String(bodyOrderNumber).trim();
+      if (!nextNum) {
+        return res.status(400).json({ error: 'Номер заказа не может быть пустым' });
+      }
+      if (nextNum !== existingOrder.orderNumber) {
+        const taken = await prisma.order.findFirst({
+          where: { orderNumber: nextNum, id: { not: id } },
+          select: { id: true },
+        });
+        if (taken) {
+          return res.status(409).json({
+            error: 'Заказ с таким номером уже есть',
+            details: nextNum,
+          });
+        }
+        updateData.orderNumber = nextNum;
+      }
+    }
+
     // Обработка "Взять в работу"
     if (takeDesign === true) {
       updateData.designTakenAt = new Date();
@@ -880,6 +902,9 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
 
     res.json(order);
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return res.status(409).json({ error: 'Этот номер заказа уже занят' });
+    }
     console.error('Update order error:', error);
     res.status(500).json({ error: 'Ошибка при обновлении заказа' });
   }

@@ -43,8 +43,28 @@ function formatPhoneNumber(phone: string): string {
   return phone; // Если формат не подходит, возвращаем как есть
 }
 
-/** LibreOffice/soffice в PATH или стандартные пути Windows */
+/** LibreOffice/soffice: переменная окружения, типичные пути Linux/Windows, затем which/where */
 function resolveLibreOfficeExecutable(): string | null {
+  const envPath =
+    (process.env.LIBREOFFICE_PATH || process.env.SOFFICE_PATH || '').trim();
+  if (envPath && fs.existsSync(envPath)) {
+    return envPath;
+  }
+
+  if (process.platform !== 'win32') {
+    const linuxPaths = [
+      '/usr/bin/soffice',
+      '/usr/bin/libreoffice',
+      '/usr/local/bin/soffice',
+      '/usr/local/bin/libreoffice',
+      '/usr/lib/libreoffice/program/soffice',
+      '/opt/libreoffice/program/soffice',
+    ];
+    for (const p of linuxPaths) {
+      if (fs.existsSync(p)) return p;
+    }
+  }
+
   const winPaths = [
     'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
     'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
@@ -52,12 +72,14 @@ function resolveLibreOfficeExecutable(): string | null {
   for (const p of winPaths) {
     if (fs.existsSync(p)) return p;
   }
+
   const whichLike = process.platform === 'win32' ? 'where' : 'which';
   for (const bin of ['libreoffice', 'soffice']) {
     try {
       const out = execSync(`${whichLike} ${bin}`, {
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'ignore'],
+        env: { ...process.env, PATH: process.env.PATH || '' },
       })
         .split(/\r?\n/)
         .map((s) => s.trim())
@@ -214,16 +236,16 @@ async function convertWordToPDF(wordPath: string, pdfPath: string): Promise<void
   const libreOfficePath = resolveLibreOfficeExecutable();
   if (!libreOfficePath) {
     throw new Error(
-      'LibreOffice не найден в PATH (проверьте: which libreoffice / which soffice). ' +
-        'На Debian/Ubuntu: sudo apt-get install -y libreoffice-writer-nogui',
+      'LibreOffice не найден (установите libreoffice-writer-nogui или задайте LIBREOFFICE_PATH=/usr/bin/soffice). ' +
+        'У процессов PM2 часто урезан PATH — абсолютный путь обязателен.',
     );
   }
-  
+
   const outputDir = path.dirname(pdfPath);
   const baseName = path.basename(wordPath, path.extname(wordPath));
   const generatedPdfPath = path.join(outputDir, `${baseName}.pdf`);
-  
-  console.log('Начинаем конвертацию Word в PDF через LibreOffice (фоновый режим)...');
+
+  console.log('[invoice] конвертация DOCX→PDF, LibreOffice:', libreOfficePath);
   
   // Используем spawn вместо exec для более тихого запуска
   // Флаги: --headless (без GUI), --invisible (невидимый), --nodefault (без окна по умолчанию)

@@ -141,6 +141,7 @@ export default function OrderDetailPage() {
   // Режим редактирования
   const [isEditing, setIsEditing] = useState(false)
   const [editForm, setEditForm] = useState({
+    orderNumber: '',
     clientName: '',
     clientPhone: '',
     clientCompany: '',
@@ -179,6 +180,7 @@ export default function OrderDetailPage() {
       setDesignComment('')
       // Инициализируем форму редактирования
       setEditForm({
+        orderNumber: res.data.orderNumber || '',
         clientName: res.data.client.name,
         clientPhone: res.data.client.phone || '',
         clientCompany: res.data.client.company || '',
@@ -408,6 +410,7 @@ export default function OrderDetailPage() {
       
       // Обновляем данные заказа
       await api.put(`/orders/${order.id}`, {
+        orderNumber: editForm.orderNumber.trim(),
         source: editForm.source,
         deadline: editForm.deadline ? new Date(editForm.deadline).toISOString() : null,
         description: editForm.description || null,
@@ -424,9 +427,18 @@ export default function OrderDetailPage() {
       // Перезагружаем данные
       await loadOrder()
       setIsEditing(false)
-    } catch (e) {
+    } catch (e: unknown) {
       console.error('Failed to save changes:', e)
-      alert('Не удалось сохранить изменения')
+      const ax = e as { response?: { data?: { error?: string; details?: string } } }
+      const apiErr = ax.response?.data?.error
+      const apiDetails = ax.response?.data?.details
+      alert(
+        apiErr
+          ? apiDetails
+            ? `${apiErr} (${apiDetails})`
+            : apiErr
+          : 'Не удалось сохранить изменения',
+      )
     } finally {
       setSavingEdit(false)
     }
@@ -474,6 +486,7 @@ export default function OrderDetailPage() {
   const handleCancelEdit = () => {
     if (!order) return
     setEditForm({
+      orderNumber: order.orderNumber || '',
       clientName: order.client.name,
       clientPhone: order.client.phone || '',
       clientCompany: order.client.company || '',
@@ -641,6 +654,16 @@ export default function OrderDetailPage() {
                 <p className="text-sm text-gray-500 mb-2">Клиент</p>
                 {isEditing ? (
                   <div className="space-y-2 max-w-md">
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Номер заказа и счёта</p>
+                      <input
+                        type="text"
+                        value={editForm.orderNumber}
+                        onChange={(e) => setEditForm({ ...editForm, orderNumber: e.target.value })}
+                        placeholder="AF-0432"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent font-medium"
+                      />
+                    </div>
                     <input
                       type="text"
                       value={editForm.clientName}

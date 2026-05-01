@@ -85,6 +85,10 @@ sudo apt-get update
 sudo apt-get install -y fonts-dejavu-core libreoffice-writer-nogui
 ```
 
+Если после установки в логах всё ещё «LibreOffice не найден», у PM2 часто **нет** `/usr/bin` в `PATH`. Задай в `backend/.env`:
+
+`LIBREOFFICE_PATH=/usr/bin/soffice` — или полный путь из `ls /usr/bin/soffice /usr/lib/libreoffice/program/soffice`.
+
 Убедиться, что в репозитории на сервере есть каталог `backend/templates/` с `.docx` шаблоном счёта.
 
 Опционально в `.env` бэкенда:
