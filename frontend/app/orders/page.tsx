@@ -8,12 +8,6 @@ import { Plus, Search, Package, Trash2, FileText, CheckCircle2, Clock3 } from 'l
 import Link from 'next/link'
 import { useDebounce } from '@/hooks/useDebounce'
 
-function designChatHref(url: string) {
-  const u = url.trim()
-  if (/^https?:\/\//i.test(u)) return u
-  return `https://${u}`
-}
-
 function designChatBadgeLabel(type?: string | null) {
   if (type === 'MAX') return 'MAX'
   if (type === 'TELEGRAM') return 'Telegram'
@@ -607,24 +601,9 @@ export default function OrdersPage() {
                         ))}
                       </div>
                       <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          {order.designChatUrl ? (
-                            <a
-                              href={designChatHref(order.designChatUrl)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs text-primary-600 font-medium truncate block hover:underline"
-                              title={order.designChatUrl}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {order.designChatUrl}
-                            </a>
-                          ) : (
-                            <p className="text-xs text-gray-500 truncate">
-                              {[order.manager?.firstName, order.manager?.lastName].filter(Boolean).join(' ') || '—'}
-                            </p>
-                          )}
-                        </div>
+                        <p className="text-xs text-gray-500 truncate min-w-0 flex-1">
+                          {[order.manager?.firstName, order.manager?.lastName].filter(Boolean).join(' ') || '—'}
+                        </p>
                         {getEffectiveDeadline(order) && (
                           <p className="text-xs text-red-600 shrink-0">
                             {new Date(getEffectiveDeadline(order) as string).toLocaleDateString('ru-RU')}
@@ -667,30 +646,32 @@ export default function OrdersPage() {
                           >
                             Отправить на согласование
                           </button>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setDesignChatUrlInput(order.designChatUrl?.trim() ?? '')
-                                setDesignChatModal({ orderId: order.id, type: 'MAX' })
-                              }}
-                              className="flex-1 px-2 py-2 text-xs border border-gray-300 rounded-lg hover:bg-gray-50 font-semibold text-gray-800 transition-colors"
-                            >
-                              MAX
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setDesignChatUrlInput(order.designChatUrl?.trim() ?? '')
-                                setDesignChatModal({ orderId: order.id, type: 'TELEGRAM' })
-                              }}
-                              className="flex-1 px-2 py-2 text-xs border border-gray-300 rounded-lg hover:bg-gray-50 font-semibold text-gray-800 transition-colors"
-                            >
-                              Telegram
-                            </button>
-                          </div>
+                          {!order.designChatUrl?.trim() && (
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setDesignChatUrlInput('')
+                                  setDesignChatModal({ orderId: order.id, type: 'MAX' })
+                                }}
+                                className="flex-1 px-2 py-2 text-xs border border-gray-300 rounded-lg hover:bg-gray-50 font-semibold text-gray-800 transition-colors"
+                              >
+                                MAX
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setDesignChatUrlInput('')
+                                  setDesignChatModal({ orderId: order.id, type: 'TELEGRAM' })
+                                }}
+                                className="flex-1 px-2 py-2 text-xs border border-gray-300 rounded-lg hover:bg-gray-50 font-semibold text-gray-800 transition-colors"
+                              >
+                                Telegram
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
 

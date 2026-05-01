@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
+import { openInvoicePdfPlaceholderTab, showInvoicePdfFromBlob } from '@/lib/openInvoicePdf'
 import { getApiBaseUrl } from '@/lib/url'
 import { Edit2, Save, Trash2, X as XIcon, FileDown } from 'lucide-react'
 
@@ -452,43 +453,46 @@ export default function OrderDetailPage() {
     }
   }
 
-  const handleDownloadInvoice = async () => {
+  const handleDownloadInvoice = () => {
     if (!order) return
+    const orderId = order.id
+    const orderNumber = order.orderNumber
+    const placeholderTab = openInvoicePdfPlaceholderTab()
     setInvoiceDownloading(true)
-    try {
-      const res = await api.get(`/orders/${order.id}/invoice`, {
-        responseType: 'blob',
-        headers: { 'X-Skip-Cache': '1' },
-      })
-      const blob = new Blob([res.data], { type: 'application/pdf' })
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      const dateRu = new Date().toLocaleDateString('ru-RU')
-      a.download = `Счёт №${order.orderNumber} от ${dateRu}.pdf`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
-    } catch (e: unknown) {
-      console.error('Invoice download failed:', e)
-      let msg = 'Не удалось скачать счёт'
-      const ax = e as { response?: { data?: Blob | unknown; status?: number } }
-      const data = ax?.response?.data
-      if (data instanceof Blob && data.size > 0 && data.size < 65536) {
+    void (async () => {
+      try {
+        const res = await api.get(`/orders/${orderId}/invoice`, {
+          responseType: 'blob',
+          headers: { 'X-Skip-Cache': '1' },
+        })
+        const blob = new Blob([res.data], { type: 'application/pdf' })
+        const dateRu = new Date().toLocaleDateString('ru-RU')
+        showInvoicePdfFromBlob(blob, `Счёт №${orderNumber} от ${dateRu}.pdf`, placeholderTab)
+      } catch (e: unknown) {
+        console.error('Invoice download failed:', e)
         try {
-          const text = await data.text()
-          const j = JSON.parse(text) as { details?: string; error?: string }
-          if (j.details) msg = `${msg}: ${j.details}`
-          else if (j.error) msg = `${msg}: ${j.error}`
+          placeholderTab?.close()
         } catch {
-          /* не JSON — например HTML от nginx при 502 */
+          /* ignore */
         }
+        let msg = 'Не удалось скачать счёт'
+        const ax = e as { response?: { data?: Blob | unknown; status?: number } }
+        const data = ax?.response?.data
+        if (data instanceof Blob && data.size > 0 && data.size < 65536) {
+          try {
+            const text = await data.text()
+            const j = JSON.parse(text) as { details?: string; error?: string }
+            if (j.details) msg = `${msg}: ${j.details}`
+            else if (j.error) msg = `${msg}: ${j.error}`
+          } catch {
+            /* не JSON — например HTML от nginx при 502 */
+          }
+        }
+        alert(msg)
+      } finally {
+        setInvoiceDownloading(false)
       }
-      alert(msg)
-    } finally {
-      setInvoiceDownloading(false)
-    }
+    })()
   }
 
   const handleCancelEdit = () => {

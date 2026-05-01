@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
+import { openInvoicePdfPlaceholderTab, showInvoicePdfFromBlob } from '@/lib/openInvoicePdf'
 import { User, Phone, Building2, Package, Calendar, CreditCard, Trash2, FileText } from 'lucide-react'
 
 const CONTACT_METHODS = [
@@ -239,6 +240,7 @@ export default function NewOrderPage() {
       alert('Укажите телефон клиента')
       return
     }
+    const invoicePdfTab = openInvoicePdfPlaceholderTab()
     setLoading(true)
     try {
       // Build full client name from first name and last name
@@ -314,24 +316,18 @@ export default function NewOrderPage() {
         }
       }
       
-      // Автоматическая загрузка PDF счета
+      // Автоматическая загрузка PDF счета (на телефоне — вкладка открыта синхронно с отправкой формы)
       if (createdId) {
         try {
           const pdfResponse = await api.get(`/orders/${createdId}/invoice`, {
-            responseType: 'blob'
+            responseType: 'blob',
           })
-          
-          const url = window.URL.createObjectURL(new Blob([pdfResponse.data], { type: 'application/pdf' }))
-          const link = document.createElement('a')
-          link.href = url
-          
-          // Получаем имя файла из заголовка Content-Disposition или используем по умолчанию
           const contentDisposition = pdfResponse.headers['content-disposition']
           const today = new Date()
           const formattedDate = today.toLocaleDateString('ru-RU', {
             day: '2-digit',
             month: '2-digit',
-            year: 'numeric'
+            year: 'numeric',
           })
           let fileName = `Счёт №${res.data.orderNumber || 'order'} от ${formattedDate}.pdf`
           if (contentDisposition) {
@@ -345,17 +341,28 @@ export default function NewOrderPage() {
               }
             }
           }
-          
-          link.download = fileName
-          document.body.appendChild(link)
-          link.click()
-          document.body.removeChild(link)
-          window.URL.revokeObjectURL(url)
-        } catch (pdfError: any) {
+          const blob = new Blob([pdfResponse.data], { type: 'application/pdf' })
+          showInvoicePdfFromBlob(blob, fileName, invoicePdfTab)
+        } catch (pdfError: unknown) {
           console.error('Failed to download invoice:', pdfError)
-          // Показываем ошибку пользователю
-          const errorMessage = pdfError?.response?.data?.details || pdfError?.response?.data?.error || pdfError?.message || 'Не удалось загрузить счет'
+          try {
+            invoicePdfTab?.close()
+          } catch {
+            /* ignore */
+          }
+          const pdfAny = pdfError as { response?: { data?: { details?: string; error?: string } }; message?: string }
+          const errorMessage =
+            pdfAny?.response?.data?.details ||
+            pdfAny?.response?.data?.error ||
+            pdfAny?.message ||
+            'Не удалось загрузить счет'
           alert(`Ошибка при загрузке счета: ${errorMessage}`)
+        }
+      } else {
+        try {
+          invoicePdfTab?.close()
+        } catch {
+          /* ignore */
         }
       }
       
@@ -363,6 +370,11 @@ export default function NewOrderPage() {
       router.push(leadId ? '/orders?status=NEW_ORDER' : '/orders')
     } catch (error: any) {
       console.error('Failed to create order:', error)
+      try {
+        invoicePdfTab?.close()
+      } catch {
+        /* ignore */
+      }
       alert(error.response?.data?.error || 'Ошибка при создании заказа')
     } finally {
       setLoading(false)
