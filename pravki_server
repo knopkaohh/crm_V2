@@ -74,7 +74,9 @@ curl -sS http://127.0.0.1:3001/health
 
 Если `health` не отватает или процесс `errored` — `pm2 restart crm-backend` и смотри ошибку в логах. Убедись, что в nginx `proxy_pass` на тот же порт, что слушает Node.
 
-**502 только на `/api/orders/.../invoice`** чаще всего: нет LibreOffice, нет шрифтов для PDF, долгая конвертация (nginx обрывает по таймауту). Тогда помогают `INVOICE_SIMPLE_FIRST=1` или `INVOICE_SIMPLE_PDF=1` и шрифты (ниже).
+**Раньше при отсутствии LibreOffice** цепочка шла в `docx-pdf` → PhantomJS и могла **уронить весь процесс Node** (PM2 ↔↔ рестарты, 502). В коде это убрано: без LibreOffice счёт идёт через **pdfkit**.
+
+**502 только на счёте** при живом `/health`: чаще шрифты/таймаут nginx. Имеет смысл `apt-get install fonts-dejavu-core` и при желании `libreoffice-writer-nogui` для PDF из Word-шаблона; иначе достаточно pdfkit + переменные ниже.
 
 На сервере (Debian/Ubuntu) имеет смысл:
 

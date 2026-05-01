@@ -506,21 +506,25 @@ export async function generateInvoicePDF(data: InvoiceData): Promise<Buffer> {
     try {
       await convertWordToPDF(tempWordPath, tempPdfPath);
     } catch (error) {
-      console.warn('Не удалось конвертировать через LibreOffice, пробуем альтернативный метод:', error);
-      
-      // Альтернативный метод: используем docx-pdf если установлен
+      // docx-pdf тянет html-pdf + PhantomJS и на VPS часто падает с Fatal AssertionError → роняет весь Node.
+      console.warn(
+        'Конвертация DOCX→PDF через LibreOffice не удалась; счёт через pdfkit:',
+        error instanceof Error ? error.message : error,
+      );
       try {
-        const docxPdf = require('docx-pdf');
-        await new Promise<void>((resolve, reject) => {
-          docxPdf(tempWordPath, tempPdfPath, (err: Error) => {
-            if (err) reject(err);
-            else resolve();
-          });
-        });
-      } catch (docxPdfError) {
-        console.error('Ошибка при конвертации через docx-pdf:', docxPdfError);
-        throw new Error('Не удалось конвертировать Word в PDF. Установите LibreOffice и добавьте его в PATH.');
+        await fsPromises.unlink(tempWordPath);
+      } catch {
+        /* очистка */
       }
+      tempWordPath = '';
+      try {
+        await fsPromises.unlink(tempPdfPath);
+      } catch {
+        /* файла могло не быть */
+      }
+      tempPdfPath = '';
+      console.warn('[invoice] без LibreOffice используем упрощённый PDF');
+      return generateInvoicePdfSimple(data);
     }
     
     // Проверяем, что PDF файл создан
