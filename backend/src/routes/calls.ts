@@ -186,7 +186,14 @@ router.post('/sync/google-sheets', authenticate, async (req: AuthRequest, res) =
     res.json(result);
   } catch (error) {
     console.error('Manual Google Sheets sync error:', error);
-    res.status(500).json({ error: (error as Error)?.message || 'Ошибка ручной синхронизации' });
+    const message = (error as Error)?.message || 'Ошибка ручной синхронизации';
+    const clientError =
+      message.includes('Не настроен') ||
+      message.includes('GOOGLE_') ||
+      message.includes('невалидный JSON') ||
+      message.includes('GOOGLE_SERVICE_ACCOUNT') ||
+      message.includes('Не удалось прочитать');
+    res.status(clientError ? 400 : 500).json({ error: message });
   }
 });
 

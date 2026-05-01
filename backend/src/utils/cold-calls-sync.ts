@@ -30,12 +30,25 @@ const getServiceAccountCredentials = () => {
   const filePath = process.env.GOOGLE_SERVICE_ACCOUNT_FILE?.trim();
 
   if (rawJson) {
-    return JSON.parse(rawJson);
+    try {
+      return JSON.parse(rawJson);
+    } catch {
+      throw new Error(
+        'GOOGLE_SERVICE_ACCOUNT_JSON: невалидный JSON. Проверьте кавычки и экранирование в .env на сервере.',
+      );
+    }
   }
 
   if (filePath) {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    return JSON.parse(content);
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      return JSON.parse(content);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(
+        `Не удалось прочитать или распарсить GOOGLE_SERVICE_ACCOUNT_FILE (${filePath}): ${msg}`,
+      );
+    }
   }
 
   throw new Error('Missing Google service account credentials');

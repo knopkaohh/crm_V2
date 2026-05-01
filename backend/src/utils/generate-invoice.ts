@@ -1,5 +1,8 @@
 import * as path from 'path';
+import fs from 'fs';
 import { promises as fsPromises } from 'fs';
+import { execSync } from 'child_process';
+import PDFDocument from 'pdfkit';
 import { Order, Client, OrderItem } from '@prisma/client';
 
 interface InvoiceData {
@@ -40,35 +43,137 @@ function formatPhoneNumber(phone: string): string {
   return phone; // Если формат не подходит, возвращаем как есть
 }
 
+/** LibreOffice/soffice в PATH или стандартные пути Windows */
+function resolveLibreOfficeExecutable(): string | null {
+  const winPaths = [
+    'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
+    'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
+  ];
+  for (const p of winPaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  const whichLike = process.platform === 'win32' ? 'where' : 'which';
+  for (const bin of ['libreoffice', 'soffice']) {
+    try {
+      const out = execSync(`${whichLike} ${bin}`, {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+      })
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean)[0];
+      if (out && fs.existsSync(out)) return out;
+    } catch {
+      /* следующий кандидат */
+    }
+  }
+  return null;
+}
+
+/** Шрифт с кириллицей для pdfkit (на VPS обычно есть после fonts-dejavu-core) */
+export function resolveCyrillicFontPath(): string | null {
+  const envFont = process.env.INVOICE_PDF_FONT?.trim();
+  if (envFont && fs.existsSync(envFont)) return envFont;
+
+  const bundled = path.join(__dirname, '../../fonts/DejaVuSans.ttf');
+  if (fs.existsSync(bundled)) return bundled;
+
+  const linuxPaths = [
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    '/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+    '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
+  ];
+  for (const p of linuxPaths) {
+    if (fs.existsSync(p)) return p;
+  }
+
+  if (process.platform === 'win32') {
+    for (const p of ['C:\\Windows\\Fonts\\arial.ttf', 'C:\\Windows\\Fonts\\arialuni.ttf']) {
+      if (fs.existsSync(p)) return p;
+    }
+  }
+  return null;
+}
+
+/**
+ * Упрощённый счёт без Word/LibreOffice — для серверов без GUI и для fallback при ошибке шаблона.
+ */
+export async function generateInvoicePdfSimple(data: InvoiceData): Promise<Buffer> {
+  const fontPath = resolveCyrillicFontPath();
+  if (!fontPath) {
+    throw new Error(
+      'Нет TTF-шрифта с кириллицей для PDF. На сервере: apt-get install -y fonts-dejavu-core ' +
+        'или задайте INVOICE_PDF_FONT=/полный/путь/к/DejaVuSans.ttf. Альтернатива: apt install libreoffice-writer-nogui',
+    );
+  }
+
+  const order = data.order;
+  const client = order.client;
+  const items = order.items || [];
+  const formattedPhone = client.phone ? formatPhoneNumber(client.phone) : '—';
+  const today = new Date().toLocaleDateString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+  const managerName = order.manager
+    ? `${order.manager.firstName} ${order.manager.lastName}`
+    : '—';
+
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const doc = new PDFDocument({ size: 'A4', margin: 48 });
+    doc.registerFont('inv', fontPath);
+    doc.font('inv');
+    doc.on('data', (c: Buffer) => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    doc.fontSize(16).text(`Счёт № ${order.orderNumber}`, { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(10).fillColor('#444').text(`Дата: ${today}`, { align: 'center' });
+    doc.fillColor('#000');
+    doc.moveDown(1.2);
+
+    doc.fontSize(11).text(`Клиент: ${client.name}`);
+    doc.text(`Телефон: ${formattedPhone}`);
+    if (client.company) doc.text(`Компания: ${client.company}`);
+    doc.text(`Менеджер: ${managerName}`);
+    doc.moveDown(1);
+
+    doc.fontSize(11).text('Позиции:', { underline: true });
+    doc.moveDown(0.5);
+    doc.fontSize(10);
+    for (const it of items) {
+      const line = it.name || 'Позиция';
+      const qty = it.quantity;
+      const sum = Number(it.price).toFixed(2);
+      doc.text(`${line} — ${qty} ед. — ${sum} ₽ (сумма по строке)`);
+      doc.moveDown(0.35);
+    }
+
+    doc.moveDown(0.5);
+    doc.moveTo(48, doc.y).lineTo(548, doc.y).stroke('#ccc');
+    doc.moveDown(0.5);
+    doc.fontSize(12).text(`Итого: ${Number(order.totalAmount).toFixed(2)} ₽`, { align: 'right' });
+
+    doc.end();
+  });
+}
+
 /**
  * Конвертирует Word документ в PDF используя LibreOffice в фоновом режиме (без показа окна/терминала)
  */
 async function convertWordToPDF(wordPath: string, pdfPath: string): Promise<void> {
   const { spawn } = require('child_process');
-  
-  // Пути к LibreOffice
-  const libreOfficePaths = [
-    'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
-    'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
-    'soffice',
-  ];
-  
-  let libreOfficePath = '';
-  for (const testPath of libreOfficePaths) {
-    try {
-      await fsPromises.access(testPath);
-      libreOfficePath = testPath;
-      break;
-    } catch {
-      if (testPath === 'soffice') {
-        libreOfficePath = testPath;
-        break;
-      }
-    }
-  }
-  
+
+  const libreOfficePath = resolveLibreOfficeExecutable();
   if (!libreOfficePath) {
-    throw new Error('LibreOffice не найден. Установите LibreOffice для конвертации Word в PDF.');
+    throw new Error(
+      'LibreOffice не найден в PATH (проверьте: which libreoffice / which soffice). ' +
+        'На Debian/Ubuntu: sudo apt-get install -y libreoffice-writer-nogui',
+    );
   }
   
   const outputDir = path.dirname(pdfPath);
@@ -145,9 +250,15 @@ async function convertWordToPDF(wordPath: string, pdfPath: string): Promise<void
 }
 
 /**
- * Генерирует PDF счет на основе Word шаблона
+ * Генерирует PDF счет на основе Word шаблона (с fallback без LibreOffice).
+ * INVOICE_SIMPLE_PDF=1 — только упрощённый pdfkit-PDF (удобно для VPS без LibreOffice).
  */
 export async function generateInvoicePDF(data: InvoiceData): Promise<Buffer> {
+  const simpleFlag = String(process.env.INVOICE_SIMPLE_PDF || '').toLowerCase();
+  if (['1', 'true', 'yes'].includes(simpleFlag)) {
+    return generateInvoicePdfSimple(data);
+  }
+
   const tempDir = path.join(__dirname, '../../temp');
   try {
     await fsPromises.access(tempDir);
@@ -391,13 +502,12 @@ export async function generateInvoicePDF(data: InvoiceData): Promise<Buffer> {
     return pdfBuffer;
     
   } catch (error: any) {
-    console.error('Ошибка при генерации PDF:', error);
+    console.error('Ошибка при генерации PDF (основной сценарий):', error);
     console.error('Детали ошибки:', {
       message: error?.message,
       stack: error?.stack,
     });
-    
-    // Удаляем временные файлы при ошибке
+
     try {
       if (tempWordPath) {
         await fsPromises.unlink(tempWordPath);
@@ -405,11 +515,17 @@ export async function generateInvoicePDF(data: InvoiceData): Promise<Buffer> {
       if (tempPdfPath) {
         await fsPromises.unlink(tempPdfPath);
       }
-    } catch (cleanupError) {
-      // Игнорируем ошибки очистки
+    } catch {
+      /* очистка */
     }
-    
-    throw error;
+
+    console.warn('[invoice] пробуем упрощённый PDF (pdfkit)...');
+    try {
+      return await generateInvoicePdfSimple(data);
+    } catch (fallbackErr: any) {
+      console.error('[invoice] упрощённый PDF не удался:', fallbackErr?.message || fallbackErr);
+      throw error;
+    }
   }
 }
 

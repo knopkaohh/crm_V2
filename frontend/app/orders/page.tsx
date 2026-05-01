@@ -635,12 +635,33 @@ export default function OrdersPage() {
                             Макет согласован
                           </button>
                           <button
-                            onClick={(e) => {
+                            onClick={async (e) => {
                               e.stopPropagation()
+                              const prevStage = order.designStage
+                              const prevRevision = order.designNeedsRevision
                               setOrders((prevOrders) =>
-                                prevOrders.map((o) => (o.id === order.id ? { ...o, designStage: 'IN_DEVELOPMENT', designNeedsRevision: true } : o))
+                                prevOrders.map((o) =>
+                                  o.id === order.id
+                                    ? { ...o, designStage: 'IN_DEVELOPMENT', designNeedsRevision: true }
+                                    : o,
+                                ),
                               )
-                              api.put(`/orders/${order.id}`, { designStage: 'IN_DEVELOPMENT', designNeedsRevision: true }).catch(() => null)
+                              try {
+                                await api.put(`/orders/${order.id}`, {
+                                  designStage: 'IN_DEVELOPMENT',
+                                  designNeedsRevision: true,
+                                })
+                              } catch (error) {
+                                console.error('Failed to request design revision:', error)
+                                setOrders((prevOrders) =>
+                                  prevOrders.map((o) =>
+                                    o.id === order.id
+                                      ? { ...o, designStage: prevStage, designNeedsRevision: prevRevision }
+                                      : o,
+                                  ),
+                                )
+                                alert('Не удалось вернуть макет на правки')
+                              }
                             }}
                             className="w-full px-3 py-2 text-xs border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors font-medium"
                           >

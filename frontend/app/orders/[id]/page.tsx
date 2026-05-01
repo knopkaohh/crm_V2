@@ -7,8 +7,7 @@ import Link from 'next/link'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
 import { getApiBaseUrl } from '@/lib/url'
-import { auth } from '@/lib/auth'
-import { Send, Edit2, Save, Trash2, X as XIcon } from 'lucide-react'
+import { Edit2, Save, Trash2, X as XIcon, FileDown } from 'lucide-react'
 
 // Lazy loading для модального окна
 const SendToProductionModal = dynamic(
@@ -28,6 +27,7 @@ interface OrderItem {
   name?: string
   material?: string
   size?: string
+  notes?: string | null
   quantity: number
   price: number
   // Параметры производства
@@ -90,6 +90,42 @@ const statusLabels: Record<string, string> = {
   ORDER_DELIVERED: 'Заказ доставлен',
 }
 
+/** Строка «Размер: …» хранится в OrderItem.notes вместе с прочими примечаниями */
+function extractSizeFromNotes(notes: string | null | undefined): string {
+  if (!notes?.trim()) return ''
+  for (const line of notes.split('\n')) {
+    const t = line.trim()
+    if (t.startsWith('Размер:')) return t.slice('Размер:'.length).trim()
+  }
+  return ''
+}
+
+function notesWithoutSizeLine(notes: string | null | undefined): string {
+  if (!notes?.trim()) return ''
+  return notes
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('Размер:'))
+    .join('\n')
+    .trim()
+}
+
+function mergeItemNotesForSave(restNotes: string | undefined, size: string | undefined): string | null {
+  const rest = (restNotes || '').trim()
+  const sz = size?.trim()
+  if (!rest && !sz) return null
+  if (!sz) return rest || null
+  if (!rest) return `Размер: ${sz}`
+  return `${rest}\nРазмер: ${sz}`
+}
+
+function normalizeItemsForEdit(items: OrderItem[]): OrderItem[] {
+  return (items || []).map((it) => ({
+    ...it,
+    size: extractSizeFromNotes(it.notes),
+    notes: notesWithoutSizeLine(it.notes) || undefined,
+  }))
+}
+
 export default function OrderDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -114,6 +150,7 @@ export default function OrderDetailPage() {
     items: [] as OrderItem[],
   })
   const [savingEdit, setSavingEdit] = useState(false)
+  const [invoiceDownloading, setInvoiceDownloading] = useState(false)
   const [designStage, setDesignStage] = useState<'IN_DEVELOPMENT' | 'ON_APPROVAL'>('IN_DEVELOPMENT')
 
   useEffect(() => {
@@ -148,7 +185,7 @@ export default function OrderDetailPage() {
         source: res.data.source || '',
         deadline: res.data.deadline ? new Date(res.data.deadline).toISOString().slice(0, 16) : '',
         description: res.data.description || '',
-        items: res.data.items || [],
+        items: normalizeItemsForEdit(res.data.items || []),
       })
     } catch (e) {
       console.error('Failed to load order:', e)
@@ -374,13 +411,13 @@ export default function OrderDetailPage() {
         source: editForm.source,
         deadline: editForm.deadline ? new Date(editForm.deadline).toISOString() : null,
         description: editForm.description || null,
-        items: editForm.items.map(item => ({
-          id: item.id,
+        items: editForm.items.map((item) => ({
+          ...(item.id ? { id: item.id } : {}),
           name: item.name,
           material: item.material,
-          size: item.size,
           quantity: item.quantity,
           price: item.price,
+          notes: mergeItemNotesForSave(item.notes ?? '', item.size),
         })),
       })
       
@@ -395,6 +432,32 @@ export default function OrderDetailPage() {
     }
   }
 
+  const handleDownloadInvoice = async () => {
+    if (!order) return
+    setInvoiceDownloading(true)
+    try {
+      const res = await api.get(`/orders/${order.id}/invoice`, {
+        responseType: 'blob',
+        headers: { 'X-Skip-Cache': '1' },
+      })
+      const blob = new Blob([res.data], { type: 'application/pdf' })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const dateRu = new Date().toLocaleDateString('ru-RU')
+      a.download = `Счёт №${order.orderNumber} от ${dateRu}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error('Invoice download failed:', e)
+      alert('Не удалось скачать счёт')
+    } finally {
+      setInvoiceDownloading(false)
+    }
+  }
+
   const handleCancelEdit = () => {
     if (!order) return
     setEditForm({
@@ -404,7 +467,7 @@ export default function OrderDetailPage() {
       source: order.source || '',
       deadline: order.deadline ? new Date(order.deadline).toISOString().slice(0, 16) : '',
       description: order.description || '',
-      items: order.items || [],
+      items: normalizeItemsForEdit(order.items || []),
     })
     setIsEditing(false)
   }
@@ -422,6 +485,7 @@ export default function OrderDetailPage() {
         name: '',
         material: '',
         size: '',
+        notes: '',
         quantity: 1,
         price: 0,
       }],
@@ -529,6 +593,15 @@ export default function OrderDetailPage() {
                   </>
                 )}
                 <button
+                  type="button"
+                  onClick={() => void handleDownloadInvoice()}
+                  disabled={invoiceDownloading}
+                  className="px-4 py-2 border border-gray-300 text-gray-800 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  <FileDown className="h-4 w-4" />
+                  {invoiceDownloading ? 'Формируем…' : 'Скачать счёт'}
+                </button>
+                <button
                   onClick={() => setIsEditing(true)}
                   className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2"
                 >
@@ -586,8 +659,8 @@ export default function OrderDetailPage() {
                 <p className="text-sm text-gray-500">Сумма</p>
                 <p className="text-xl font-bold text-gray-900">
                   {new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' }).format(
-                    isEditing 
-                      ? editForm.items.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0)
+                    isEditing
+                      ? editForm.items.reduce((sum, item) => sum + Number(item.price || 0), 0)
                       : Number(order.totalAmount)
                   )}
                 </p>
@@ -635,6 +708,13 @@ export default function OrderDetailPage() {
                                 placeholder="Размер"
                                 className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                               />
+                              <textarea
+                                value={it.notes ?? ''}
+                                onChange={(e) => updateEditItem(idx, 'notes', e.target.value)}
+                                placeholder="Примечания к позиции (без строки «Размер» — она задаётся полем выше)"
+                                rows={2}
+                                className="col-span-2 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                              />
                               <div className="grid grid-cols-2 gap-2">
                                 <input
                                   type="number"
@@ -648,7 +728,7 @@ export default function OrderDetailPage() {
                                   type="number"
                                   value={it.price}
                                   onChange={(e) => updateEditItem(idx, 'price', parseFloat(e.target.value) || 0)}
-                                  placeholder="Цена"
+                                  placeholder="Сумма позиции"
                                   min="0"
                                   step="0.01"
                                   className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -669,11 +749,12 @@ export default function OrderDetailPage() {
                         <>
                       <div className="flex items-center justify-between mb-3">
                         <div className="text-gray-800 font-medium">
-                          {(it.name || `${it.material || ''} ${it.size || ''}`).trim() || 'Позиция'}
+                          {(it.name || `${it.material || ''}`).trim() || 'Позиция'}
                         </div>
                         <div className="flex items-center gap-3">
                           <div className="text-sm text-gray-600">
-                            x{it.quantity} — {new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' }).format(Number(it.price))}
+                            x{it.quantity} — {new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' }).format(Number(it.price))}{' '}
+                            <span className="text-xs text-gray-400">(сумма строки)</span>
                           </div>
                           {order.status === 'AWAITING_MATERIALS' && it.id && (
                             <button
@@ -691,6 +772,9 @@ export default function OrderDetailPage() {
                           )}
                         </div>
                       </div>
+                      {it.notes?.trim() ? (
+                        <p className="text-xs text-gray-600 mb-2 whitespace-pre-wrap">{it.notes}</p>
+                      ) : null}
                         </>
                       )}
                       {!isEditing && (

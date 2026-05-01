@@ -9,6 +9,27 @@ import { canAccessLeadByManager } from '../utils/leads-access';
 
 const router = express.Router();
 
+/** Только свой заказ для менеджера продаж; остальные роли — по текущей политике заказов */
+function canMutateOrder(req: AuthRequest, managerId: string): boolean {
+  if (req.userRole === 'SALES_MANAGER') {
+    return Boolean(req.userId && req.userId === managerId);
+  }
+  return true;
+}
+
+async function recalcOrderTotalAmount(orderId: string) {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { items: true },
+  });
+  if (!order) return;
+  const totalAmount = order.items.reduce((sum, it) => sum + Number(it.price), 0);
+  await prisma.order.update({
+    where: { id: orderId },
+    data: { totalAmount },
+  });
+}
+
 // Получить все заказы
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -645,6 +666,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
       source,
       designStage,
       designNeedsRevision,
+      items: itemsPayload,
     } = req.body;
 
     const existingOrder = await prisma.order.findUnique({
@@ -729,6 +751,88 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
       }
     }
 
+    if (Array.isArray(itemsPayload)) {
+      if (itemsPayload.length === 0) {
+        return res.status(400).json({ error: 'Нужна хотя бы одна позиция заказа' });
+      }
+
+      let syncedTotal: number;
+      try {
+        syncedTotal = await prisma.$transaction(async (tx) => {
+          const existingRows = await tx.orderItem.findMany({
+            where: { orderId: id },
+            select: { id: true },
+          });
+          const existingIds = new Set(existingRows.map((r) => r.id));
+
+          for (const raw of itemsPayload) {
+            const rid = raw?.id ? String(raw.id) : '';
+            if (rid && !existingIds.has(rid)) {
+              throw new Error('BAD_ITEM_ID');
+            }
+          }
+
+          const incomingIds = new Set(
+            itemsPayload.filter((i: any) => i?.id).map((i: any) => String(i.id)),
+          );
+          const toRemove = [...existingIds].filter((eid) => !incomingIds.has(eid));
+          if (toRemove.length > 0) {
+            await tx.orderItem.deleteMany({
+              where: { orderId: id, id: { in: toRemove } },
+            });
+          }
+
+          for (const raw of itemsPayload) {
+            const name = String(raw.name ?? '').trim() || 'Позиция';
+            const quantity = Math.max(1, parseInt(String(raw.quantity ?? 1), 10) || 1);
+            const price = parseFloat(String(raw.price ?? 0)) || 0;
+            const material =
+              raw.material !== undefined && raw.material !== null
+                ? String(raw.material).trim() || null
+                : null;
+            let notesVal: string | null = null;
+            if (raw.notes !== undefined && raw.notes !== null) {
+              const n = String(raw.notes).trim();
+              notesVal = n.length ? n : null;
+            }
+
+            const rowId = raw?.id ? String(raw.id) : '';
+
+            if (rowId && existingIds.has(rowId)) {
+              const itemUpdate: any = { name, quantity, price, material };
+              if (raw.notes !== undefined) itemUpdate.notes = notesVal;
+              await tx.orderItem.update({
+                where: { id: rowId },
+                data: itemUpdate,
+              });
+            } else {
+              await tx.orderItem.create({
+                data: {
+                  orderId: id,
+                  name,
+                  quantity,
+                  price,
+                  material,
+                  notes: notesVal,
+                },
+              });
+            }
+          }
+
+          const allItems = await tx.orderItem.findMany({ where: { orderId: id } });
+          return allItems.reduce((sum, it) => sum + Number(it.price), 0);
+        });
+      } catch (e: unknown) {
+        if (e instanceof Error && e.message === 'BAD_ITEM_ID') {
+          return res.status(400).json({ error: 'Указан неизвестный id позиции' });
+        }
+        console.error('Sync order items error:', e);
+        return res.status(500).json({ error: 'Ошибка при сохранении позиций заказа' });
+      }
+
+      updateData.totalAmount = syncedTotal;
+    }
+
     const order = await prisma.order.update({
       where: { id },
       data: updateData,
@@ -776,6 +880,17 @@ router.post('/:id/items', authenticate, async (req: AuthRequest, res) => {
 
     if (!name || !quantity || !price) {
       return res.status(400).json({ error: 'Название, количество и цена обязательны' });
+    }
+
+    const parentOrder = await prisma.order.findUnique({
+      where: { id },
+      select: { id: true, managerId: true },
+    });
+    if (!parentOrder) {
+      return res.status(404).json({ error: 'Заказ не найден' });
+    }
+    if (!canMutateOrder(req, parentOrder.managerId)) {
+      return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 
     const item = await prisma.orderItem.create({
@@ -835,6 +950,10 @@ router.put('/:orderId/items/:itemId', authenticate, async (req: AuthRequest, res
       return res.status(400).json({ error: 'Позиция не принадлежит указанному заказу' });
     }
 
+    if (!canMutateOrder(req, existingItem.order.managerId)) {
+      return res.status(403).json({ error: 'Недостаточно прав доступа' });
+    }
+
     // Преобразуем дату, если она есть
     if (updateData.desiredDeadline) {
       updateData.desiredDeadline = new Date(updateData.desiredDeadline);
@@ -871,6 +990,8 @@ router.put('/:orderId/items/:itemId', authenticate, async (req: AuthRequest, res
       where: { id: itemId },
       data: cleanedData,
     });
+
+    await recalcOrderTotalAmount(orderId);
 
     res.json(item);
   } catch (error: any) {
