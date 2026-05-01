@@ -8,6 +8,18 @@ import { Plus, Search, Package, Trash2, FileText, CheckCircle2, Clock3 } from 'l
 import Link from 'next/link'
 import { useDebounce } from '@/hooks/useDebounce'
 
+function designChatHref(url: string) {
+  const u = url.trim()
+  if (/^https?:\/\//i.test(u)) return u
+  return `https://${u}`
+}
+
+function designChatBadgeLabel(type?: string | null) {
+  if (type === 'MAX') return 'MAX'
+  if (type === 'TELEGRAM') return 'Telegram'
+  return ''
+}
+
 interface Order {
   id: string
   orderNumber: string
@@ -33,6 +45,8 @@ interface Order {
   designTakenBy?: string | null
   designStage?: 'IN_DEVELOPMENT' | 'ON_APPROVAL'
   designNeedsRevision?: boolean
+  designChatUrl?: string | null
+  designChatType?: 'MAX' | 'TELEGRAM' | null
   items: Array<{
     id: string
     name: string
@@ -77,6 +91,11 @@ export default function OrdersPage() {
   const [statusFilter, setStatusFilter] = useState<string>(initialStatusFilter)
   const [draggedOrder, setDraggedOrder] = useState<string | null>(null)
   const [dragOverStatus, setDragOverStatus] = useState<string | null>(null)
+  const [designChatModal, setDesignChatModal] = useState<{
+    orderId: string
+    type: 'MAX' | 'TELEGRAM'
+  } | null>(null)
+  const [designChatUrlInput, setDesignChatUrlInput] = useState('')
 
   const loadOrders = useCallback(async () => {
     try {
@@ -406,7 +425,7 @@ export default function OrdersPage() {
 
   const columns = [
     { key: 'NEW_ORDER', label: 'Новый заказ' },
-    { key: 'DESIGN_IN_DEVELOPMENT', label: 'Макеты в разработку' },
+    { key: 'DESIGN_IN_DEVELOPMENT', label: 'Разработка макетов' },
     { key: 'DESIGN_ON_APPROVAL', label: 'Макеты на согласовании' },
     { key: 'AWAITING_MATERIALS', label: 'Готовы к запуску' },
     { key: 'IN_PRODUCTION', label: 'В производстве' },
@@ -541,9 +560,20 @@ export default function OrdersPage() {
                       }`}
                       onClick={() => router.push(`/orders/${order.id}`)}
                     >
-                      <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-start justify-between mb-2 gap-2">
                         <h4 className="font-medium text-gray-900 text-sm">{order.orderNumber || `Заказ #${order.id.slice(0, 8)}`}</h4>
-                        <Package className="h-4 w-4 text-gray-400" />
+                        <div className="flex items-center gap-1 shrink-0">
+                          {designChatBadgeLabel(order.designChatType) && (
+                            <span
+                              className={`text-[10px] font-semibold tracking-tight text-primary-700 ${
+                                order.designChatType === 'MAX' ? 'uppercase' : ''
+                              }`}
+                            >
+                              {designChatBadgeLabel(order.designChatType)}
+                            </span>
+                          )}
+                          <Package className="h-4 w-4 text-gray-400" />
+                        </div>
                       </div>
                       <p className="text-sm text-gray-600 mb-1">{order.client?.name || 'Без имени'}</p>
                       {order.client?.phone && (
@@ -576,12 +606,27 @@ export default function OrdersPage() {
                           </span>
                         ))}
                       </div>
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs text-gray-500">
-                          {order.manager?.firstName || ''} {order.manager?.lastName || ''}
-                        </p>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          {order.designChatUrl ? (
+                            <a
+                              href={designChatHref(order.designChatUrl)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-primary-600 font-medium truncate block hover:underline"
+                              title={order.designChatUrl}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {order.designChatUrl}
+                            </a>
+                          ) : (
+                            <p className="text-xs text-gray-500 truncate">
+                              {[order.manager?.firstName, order.manager?.lastName].filter(Boolean).join(' ') || '—'}
+                            </p>
+                          )}
+                        </div>
                         {getEffectiveDeadline(order) && (
-                          <p className="text-xs text-red-600">
+                          <p className="text-xs text-red-600 shrink-0">
                             {new Date(getEffectiveDeadline(order) as string).toLocaleDateString('ru-RU')}
                           </p>
                         )}
@@ -601,7 +646,7 @@ export default function OrdersPage() {
                       
                       {/* Отправить на согласование: только в колонке "Макеты в разработку" */}
                       {order.status === 'DESIGN_APPROVAL' && getDesignStage(order) === 'IN_DEVELOPMENT' && (
-                        <div className="mt-3 pt-3 border-t border-gray-200">
+                        <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
                           <button
                             onClick={async (e) => {
                               e.stopPropagation()
@@ -622,6 +667,30 @@ export default function OrdersPage() {
                           >
                             Отправить на согласование
                           </button>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setDesignChatUrlInput(order.designChatUrl?.trim() ?? '')
+                                setDesignChatModal({ orderId: order.id, type: 'MAX' })
+                              }}
+                              className="flex-1 px-2 py-2 text-xs border border-gray-300 rounded-lg hover:bg-gray-50 font-semibold text-gray-800 transition-colors"
+                            >
+                              MAX
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setDesignChatUrlInput(order.designChatUrl?.trim() ?? '')
+                                setDesignChatModal({ orderId: order.id, type: 'TELEGRAM' })
+                              }}
+                              className="flex-1 px-2 py-2 text-xs border border-gray-300 rounded-lg hover:bg-gray-50 font-semibold text-gray-800 transition-colors"
+                            >
+                              Telegram
+                            </button>
+                          </div>
                         </div>
                       )}
 
@@ -741,6 +810,72 @@ export default function OrdersPage() {
           })}
         </div>
 
+        {designChatModal && (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+            onClick={() => {
+              setDesignChatModal(null)
+              setDesignChatUrlInput('')
+            }}
+          >
+            <div
+              className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl border border-gray-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="text-sm font-medium text-gray-900 mb-3">Вставьте ссылку на чат</p>
+              <input
+                type="url"
+                autoFocus
+                value={designChatUrlInput}
+                onChange={(e) => setDesignChatUrlInput(e.target.value)}
+                placeholder="https://…"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent mb-4"
+              />
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  className="px-3 py-2 text-sm rounded-lg border border-gray-300 hover:bg-gray-50"
+                  onClick={() => {
+                    setDesignChatModal(null)
+                    setDesignChatUrlInput('')
+                  }}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-2 text-sm rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+                  onClick={async () => {
+                    const url = designChatUrlInput.trim()
+                    if (!url) {
+                      alert('Вставьте ссылку')
+                      return
+                    }
+                    const type = designChatModal.type
+                    try {
+                      await api.put(`/orders/${designChatModal.orderId}`, {
+                        designChatUrl: url,
+                        designChatType: type,
+                      })
+                      setOrders((prev) =>
+                        prev.map((o) =>
+                          o.id === designChatModal.orderId ? { ...o, designChatUrl: url, designChatType: type } : o,
+                        ),
+                      )
+                      setDesignChatModal(null)
+                      setDesignChatUrlInput('')
+                    } catch (err) {
+                      console.error(err)
+                      alert('Не удалось сохранить ссылку')
+                    }
+                  }}
+                >
+                  Сохранить
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </Layout>
   )

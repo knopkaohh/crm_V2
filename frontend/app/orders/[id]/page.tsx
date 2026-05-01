@@ -64,6 +64,8 @@ interface Order {
   designStage?: 'IN_DEVELOPMENT' | 'ON_APPROVAL'
   designNeedsRevision?: boolean
   designComments?: string | null
+  designChatUrl?: string | null
+  designChatType?: 'MAX' | 'TELEGRAM' | null
   description?: string | null
   source?: string | null
   totalAmount: number
@@ -83,7 +85,7 @@ interface Task {
 
 const statusLabels: Record<string, string> = {
   NEW_ORDER: 'Новый заказ',
-  DESIGN_APPROVAL: 'Макеты в разработке',
+  DESIGN_APPROVAL: 'Разработка макетов',
   AWAITING_MATERIALS: 'Готовы к запуску',
   IN_PRODUCTION: 'В производстве',
   ORDER_READY: 'Заказ готов',
@@ -107,6 +109,12 @@ function notesWithoutSizeLine(notes: string | null | undefined): string {
     .filter((line) => !line.trim().startsWith('Размер:'))
     .join('\n')
     .trim()
+}
+
+function designChatHref(url: string) {
+  const u = url.trim()
+  if (/^https?:\/\//i.test(u)) return u
+  return `https://${u}`
 }
 
 function mergeItemNotesForSave(restNotes: string | undefined, size: string | undefined): string | null {
@@ -213,7 +221,7 @@ export default function OrderDetailPage() {
 
   const getCurrentStageLabel = () => {
     if (!order) return 'Неизвестный этап'
-    if (order.status === 'DESIGN_APPROVAL' && designStage === 'IN_DEVELOPMENT') return 'Макеты в разработке'
+    if (order.status === 'DESIGN_APPROVAL' && designStage === 'IN_DEVELOPMENT') return 'Разработка макетов'
     if (order.status === 'DESIGN_APPROVAL' && designStage === 'ON_APPROVAL') return 'Макеты на согласовании'
     return statusLabels[order.status] || order.status
   }
@@ -567,7 +575,7 @@ export default function OrderDetailPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Заказ {order.orderNumber || order.id}</h1>
-            <p className="text-gray-600 mt-1">{statusLabels[order.status] || order.status}</p>
+            <p className="text-gray-600 mt-1">{getCurrentStageLabel()}</p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             {isEditing ? (
@@ -970,6 +978,24 @@ export default function OrderDetailPage() {
             )}
           </div>
           <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-xl shadow-primary-900/5 space-y-4">
+            {order.designChatUrl && order.designChatType && (
+              <div>
+                <p className="text-sm text-gray-500">
+                  Чат макетов
+                  <span className="text-gray-900 font-medium ml-1">
+                    · {order.designChatType === 'MAX' ? 'MAX' : 'Telegram'}
+                  </span>
+                </p>
+                <a
+                  href={designChatHref(order.designChatUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary-600 font-medium text-sm break-all hover:underline mt-0.5 inline-block"
+                >
+                  {order.designChatUrl}
+                </a>
+              </div>
+            )}
             {order.manager && (
               <div>
                 <p className="text-sm text-gray-500">Ответственный менеджер</p>

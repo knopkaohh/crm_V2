@@ -241,6 +241,8 @@ model Order {
   designStage   String      @default("IN_DEVELOPMENT") // Стадия внутри DESIGN_APPROVAL
   designNeedsRevision Boolean @default(false) // Нужны ли правки по макету
   designComments String?    // Комментарии по макету
+  designChatUrl  String?   // Ссылка на чат макетов (MAX / Telegram)
+  designChatType String?   // MAX | TELEGRAM
   description   String?     // Описание заказа
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt

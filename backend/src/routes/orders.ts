@@ -122,6 +122,8 @@ router.get('/', authenticate, async (req, res) => {
         designStage: true,
         designNeedsRevision: true,
         designComments: true,
+        designChatUrl: true,
+        designChatType: true,
         description: true,
         createdAt: true,
         updatedAt: true,
@@ -322,6 +324,8 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
         designStage: true,
         designNeedsRevision: true,
         designComments: true,
+        designChatUrl: true,
+        designChatType: true,
         description: true,
         deliveredAt: true,
         createdAt: true,
@@ -680,6 +684,8 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
       source,
       designStage,
       designNeedsRevision,
+      designChatUrl,
+      designChatType,
       items: itemsPayload,
       orderNumber: bodyOrderNumber,
     } = req.body;
@@ -710,6 +716,20 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
     if (source !== undefined) updateData.source = source;
     if (designStage !== undefined) updateData.designStage = designStage;
     if (designNeedsRevision !== undefined) updateData.designNeedsRevision = Boolean(designNeedsRevision);
+
+    if (designChatUrl !== undefined && designChatType !== undefined) {
+      const rawUrl = String(designChatUrl ?? '').trim();
+      const rawType = String(designChatType ?? '').trim().toUpperCase();
+      if (!rawUrl) {
+        updateData.designChatUrl = null;
+        updateData.designChatType = null;
+      } else if (rawType !== 'MAX' && rawType !== 'TELEGRAM') {
+        return res.status(400).json({ error: 'designChatType должен быть MAX или TELEGRAM' });
+      } else {
+        updateData.designChatUrl = rawUrl;
+        updateData.designChatType = rawType;
+      }
+    }
 
     if (bodyOrderNumber !== undefined && bodyOrderNumber !== null) {
       const nextNum = String(bodyOrderNumber).trim();
