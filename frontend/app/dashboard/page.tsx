@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
-import { CalendarRange, TrendingUp, Package } from 'lucide-react'
+import { CalendarRange } from 'lucide-react'
 
 interface DashboardData {
   leads: {
@@ -25,9 +25,29 @@ interface DashboardData {
   revenue: {
     total: number
   }
+  currentMonth: {
+    ordersTotal: number
+    revenueTotal: number
+    averageCheck: number
+    producedUnitsTotal: number
+    leadsTotal: number
+    leadsBySource: {
+      site: number
+      avito: number
+      calls: number
+      projectSales: number
+    }
+    managerRevenue: Array<{
+      managerId: string
+      name: string
+      assemblyRevenue: number
+      packageRevenue: number
+    }>
+  }
 }
 
 interface ManagerStat {
+  managerId?: string
   name: string
   shortName: string
   assemblyRevenue: number
@@ -42,21 +62,6 @@ const MANAGERS: ManagerStat[] = [
   { name: 'Никита Царьков', shortName: 'Никита', assemblyRevenue: 0, packageRevenue: 0 },
   { name: 'Нариман Алескеров', shortName: 'Нариман', assemblyRevenue: 0, packageRevenue: 0 },
   { name: 'Максим Шалагинов', shortName: 'Максим', assemblyRevenue: 0, packageRevenue: 0 },
-]
-
-const YEAR_REVENUE = [
-  { month: 'Янв', value: 2950000 },
-  { month: 'Фев', value: 3260000 },
-  { month: 'Мар', value: 3550000 },
-  { month: 'Апр', value: 3720000 },
-  { month: 'Май', value: 3860000 },
-  { month: 'Июн', value: 4010000 },
-  { month: 'Июл', value: 4170000 },
-  { month: 'Авг', value: 4320000 },
-  { month: 'Сен', value: 4460000 },
-  { month: 'Окт', value: 4620000 },
-  { month: 'Ноя', value: 4790000 },
-  { month: 'Дек', value: 4950000 },
 ]
 
 const formatMoney = (value: number) =>
@@ -110,7 +115,7 @@ export default function DashboardPage() {
 
   const openPlanModal = () => {
     const initialDrafts: Record<string, number> = {}
-    MANAGERS.forEach((manager) => {
+    managerRows.forEach((manager) => {
       initialDrafts[manager.name] = plansForPeriod[manager.name] ?? defaultPlanForManager(manager.name)
     })
     setDraftPlans(initialDrafts)
@@ -138,15 +143,7 @@ export default function DashboardPage() {
     }
   }
 
-  const monthlyRevenue = useMemo(() => {
-    const base =
-      data?.revenue.total ??
-      MANAGERS.reduce(
-        (sum, manager) => sum + manager.assemblyRevenue + manager.packageRevenue,
-        0
-      )
-    return selectedPeriod === getCurrentMonthInput() ? base : Math.round(base * 0.9)
-  }, [data?.revenue.total, selectedPeriod])
+  const monthlyRevenue = useMemo(() => data?.currentMonth.revenueTotal ?? 0, [data?.currentMonth.revenueTotal])
 
   const plansForPeriod = plansByPeriod[selectedPeriod] ?? {}
 
@@ -164,31 +161,45 @@ export default function DashboardPage() {
   }
 
   const managerRows = useMemo(() => {
-    return MANAGERS.map((manager) => {
-      const salesRevenue = manager.assemblyRevenue + manager.packageRevenue
+    const managerRevenueFromApi = data?.currentMonth.managerRevenue ?? []
+    const apiByName = managerRevenueFromApi.reduce((acc, manager) => {
+      acc[manager.name] = manager
+      return acc
+    }, {} as Record<string, (typeof managerRevenueFromApi)[number]>)
+
+    const baseRows = MANAGERS.map((manager) => {
+      const apiManager = apiByName[manager.name]
+      const assemblyRevenue = apiManager?.assemblyRevenue ?? manager.assemblyRevenue
+      const packageRevenue = apiManager?.packageRevenue ?? manager.packageRevenue
+      const salesRevenue = assemblyRevenue + packageRevenue
       const revenue = salesRevenue
       const plan = plansForPeriod[manager.name] ?? defaultPlanForManager(manager.name)
       const percent = plan > 0 ? Number(((revenue / plan) * 100).toFixed(2)) : 0
-      return { ...manager, salesRevenue, revenue, plan, percent }
+      return { ...manager, assemblyRevenue, packageRevenue, salesRevenue, revenue, plan, percent }
     })
-  }, [plansForPeriod])
 
-  const maxTrendValue = Math.max(...YEAR_REVENUE.map((item) => item.value))
-  const minTrendValue = Math.min(...YEAR_REVENUE.map((item) => item.value))
-  const trendRange = Math.max(maxTrendValue - minTrendValue, 1)
+    const knownNames = new Set(MANAGERS.map((manager) => manager.name))
+    const extraRows = managerRevenueFromApi
+      .filter((manager) => !knownNames.has(manager.name))
+      .map((manager) => {
+        const salesRevenue = manager.assemblyRevenue + manager.packageRevenue
+        const plan = plansForPeriod[manager.name] ?? defaultPlanForManager(manager.name)
+        const percent = plan > 0 ? Number(((salesRevenue / plan) * 100).toFixed(2)) : 0
+        return {
+          managerId: manager.managerId,
+          name: manager.name,
+          shortName: manager.name.split(' ')[0] || manager.name,
+          assemblyRevenue: manager.assemblyRevenue,
+          packageRevenue: manager.packageRevenue,
+          salesRevenue,
+          revenue: salesRevenue,
+          plan,
+          percent,
+        }
+      })
 
-  const getTrendY = (value: number) => {
-    // Keep margins top/bottom so line breathes inside chart.
-    return 85 - ((value - minTrendValue) / trendRange) * 65
-  }
-
-  const trendPoints = YEAR_REVENUE.map((item, index) => {
-    const x = (index / (YEAR_REVENUE.length - 1)) * 100
-    const y = getTrendY(item.value)
-    return `${x},${y}`
-  }).join(' ')
-
-  const trendAreaPath = `${trendPoints} 100,92 0,92`
+    return [...baseRows, ...extraRows]
+  }, [data?.currentMonth.managerRevenue, plansForPeriod])
 
   if (loading) {
     return (
@@ -201,16 +212,14 @@ export default function DashboardPage() {
   }
 
   const extraStats = [
-    { title: 'Общее количество заказов', value: data?.orders.total ?? 214 },
-    { title: 'Общее количество обработанных лидов', value: data?.leads.total ?? 487 },
-    { title: 'Общее количество теплых обзвонов', value: 326 },
-    { title: 'Общее количество лидов с Авито', value: 182 },
-    { title: 'Общее количество лидов с Проектных продаж', value: 96 },
-    { title: 'Общее количество лидов с сайта', value: 209 },
-    { title: 'Общее количество произведенных единиц продукции', value: 1342 },
-    { title: 'Средний чек', value: formatMoney(51200) },
-    { title: 'Средний цикл сделки', value: '11.2 дня' },
-    { title: 'Доля повторных клиентов', value: '34%' },
+    { title: 'Общее кол-во заказов', value: data?.currentMonth.ordersTotal ?? 0 },
+    { title: 'Средний чек', value: formatMoney(data?.currentMonth.averageCheck ?? 0) },
+    { title: 'Всего произведено единиц', value: data?.currentMonth.producedUnitsTotal ?? 0 },
+    { title: 'Общее кол-во лидов', value: data?.currentMonth.leadsTotal ?? 0 },
+    { title: 'Лиды с сайта', value: data?.currentMonth.leadsBySource.site ?? 0 },
+    { title: 'Лиды с Авито', value: data?.currentMonth.leadsBySource.avito ?? 0 },
+    { title: 'Лиды с обзвонов', value: data?.currentMonth.leadsBySource.calls ?? 0 },
+    { title: 'Лиды с проектных продаж', value: data?.currentMonth.leadsBySource.projectSales ?? 0 },
   ]
 
   const getCompletionClassName = (percent: number) => {
@@ -244,7 +253,7 @@ export default function DashboardPage() {
               <span className="text-primary-700 text-xl font-bold leading-none">₽</span>
             </div>
             <div>
-              <p className="text-sm text-gray-600">Общая выручка за период</p>
+              <p className="text-sm text-gray-600">Общая выручка за текущий месяц</p>
               <p className="text-3xl font-bold text-gray-900">{formatMoney(monthlyRevenue)}</p>
             </div>
           </div>
@@ -359,71 +368,13 @@ export default function DashboardPage() {
           </table>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <TrendingUp className="h-5 w-5 text-emerald-600" />
-            <h2 className="text-lg font-semibold text-gray-900">Тренд выручки за календарный год</h2>
-          </div>
-          <div className="rounded-xl bg-gray-50 border border-gray-200 p-4">
-            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-56">
-              <defs>
-                <linearGradient id="trendArea" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.28" />
-                  <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.03" />
-                </linearGradient>
-              </defs>
-              <polyline fill="none" stroke="#d1d5db" strokeWidth="0.6" points="0,92 100,92" />
-              <polyline fill="none" stroke="#d1d5db" strokeWidth="0.6" points="0,74 100,74" />
-              <polyline fill="none" stroke="#d1d5db" strokeWidth="0.6" points="0,56 100,56" />
-              <polyline fill="none" stroke="#d1d5db" strokeWidth="0.6" points="0,38 100,38" />
-              <polyline fill="none" stroke="#d1d5db" strokeWidth="0.6" points="0,20 100,20" />
-              <polygon fill="url(#trendArea)" points={trendAreaPath} />
-              <polyline fill="none" stroke="#3b82f6" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" points={trendPoints} />
-              {YEAR_REVENUE.map((point, index) => {
-                const x = (index / (YEAR_REVENUE.length - 1)) * 100
-                const y = getTrendY(point.value)
-                return <circle key={point.month} cx={x} cy={y} r="1.4" fill="#2563eb" />
-              })}
-            </svg>
-            <div className="grid grid-cols-6 md:grid-cols-12 gap-2 mt-2 text-xs text-gray-600">
-              {YEAR_REVENUE.map((item) => (
-                <div key={item.month} className="text-center">
-                  <p>{item.month}</p>
-                  <p className="font-medium">{(item.value / 1000000).toFixed(2)} млн</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           {extraStats.map((item) => (
             <div key={item.title} className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
               <p className="text-xs text-gray-500 min-h-[2.5rem]">{item.title}</p>
               <p className="mt-2 text-xl font-semibold text-gray-900">{item.value}</p>
             </div>
           ))}
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
-            <p className="text-sm text-gray-500">Прогноз выручки к концу месяца</p>
-            <p className="text-2xl font-bold text-gray-900 mt-2">{formatMoney(monthlyRevenue * 1.12)}</p>
-            <p className="text-sm text-emerald-600 mt-1">+12% при текущем темпе</p>
-          </div>
-          <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
-            <p className="text-sm text-gray-500">Загрузка производства</p>
-            <p className="text-2xl font-bold text-gray-900 mt-2">78%</p>
-            <p className="text-sm text-gray-600 mt-1">Оптимальная зона 70-85%</p>
-          </div>
-          <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
-            <div className="flex items-center gap-2">
-              <Package className="h-5 w-5 text-indigo-600" />
-              <p className="text-sm text-gray-500">Готово к отгрузке</p>
-            </div>
-            <p className="text-2xl font-bold text-gray-900 mt-2">{data?.orders.ready ?? 39} заказов</p>
-            <p className="text-sm text-gray-600 mt-1">В производстве: {data?.orders.inProduction ?? 28}</p>
-          </div>
         </div>
       </div>
 

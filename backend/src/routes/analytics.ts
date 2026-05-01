@@ -15,9 +15,12 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
     const whereManager = userRole === 'SALES_MANAGER' ? { managerId: userId } : {};
     const whereCreator = userRole === 'SALES_MANAGER' ? { creatorId: userId } : {};
     const whereAssignee = userRole === 'SALES_MANAGER' ? { assigneeId: userId } : {};
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
     // Оптимизация: выполняем все запросы параллельно
-    const today = new Date();
+    const today = new Date(now);
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -33,6 +36,12 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
       todayTasks,
       overdueTasks,
       totalRevenue,
+      currentMonthOrders,
+      currentMonthOrderStats,
+      currentMonthProducedUnits,
+      currentMonthLeads,
+      currentMonthOrdersWithItems,
+      salesManagers,
     ] = await Promise.all([
       prisma.lead.count({ where: whereManager }),
       prisma.lead.count({ where: { ...whereManager, status: 'NEW_LEAD' } }),
@@ -62,11 +71,182 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
         },
         _sum: { totalAmount: true },
       }),
+      prisma.order.count({
+        where: {
+          ...whereManager,
+          createdAt: {
+            gte: currentMonthStart,
+            lt: nextMonthStart,
+          },
+        },
+      }),
+      prisma.order.aggregate({
+        where: {
+          ...whereManager,
+          createdAt: {
+            gte: currentMonthStart,
+            lt: nextMonthStart,
+          },
+        },
+        _sum: {
+          totalAmount: true,
+        },
+        _avg: {
+          totalAmount: true,
+        },
+      }),
+      prisma.orderItem.aggregate({
+        where: {
+          order: {
+            ...whereManager,
+            createdAt: {
+              gte: currentMonthStart,
+              lt: nextMonthStart,
+            },
+          },
+        },
+        _sum: {
+          quantity: true,
+        },
+      }),
+      prisma.lead.findMany({
+        where: {
+          ...whereManager,
+          createdAt: {
+            gte: currentMonthStart,
+            lt: nextMonthStart,
+          },
+        },
+        select: {
+          source: true,
+        },
+      }),
+      prisma.order.findMany({
+        where: {
+          ...whereManager,
+          createdAt: {
+            gte: currentMonthStart,
+            lt: nextMonthStart,
+          },
+        },
+        select: {
+          managerId: true,
+          totalAmount: true,
+          manager: {
+            select: {
+              firstName: true,
+              lastName: true,
+            },
+          },
+          items: {
+            select: {
+              name: true,
+              price: true,
+            },
+          },
+        },
+      }),
+      prisma.user.findMany({
+        where: userRole === 'SALES_MANAGER'
+          ? { id: userId, role: 'SALES_MANAGER', isActive: true }
+          : { role: 'SALES_MANAGER', isActive: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+        },
+        orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+      }),
     ]);
+
+    const normalize = (value: string | null | undefined) => (value ?? '').trim().toLowerCase();
+    const currentMonthLeadBySource = currentMonthLeads.reduce(
+      (acc, lead) => {
+        const source = normalize(lead.source);
+        if (!source) return acc;
+
+        if (source.includes('avito') || source.includes('авито')) {
+          acc.avito += 1;
+        } else if (source.includes('сайт') || source.includes('site')) {
+          acc.site += 1;
+        } else if (source.includes('обзвон')) {
+          acc.calls += 1;
+        } else if (source.includes('проект')) {
+          acc.projectSales += 1;
+        }
+        return acc;
+      },
+      {
+        site: 0,
+        avito: 0,
+        calls: 0,
+        projectSales: 0,
+      }
+    );
 
     // Конверсия лидов
     const conversionRate =
       totalLeads > 0 ? ((convertedLeads / totalLeads) * 100).toFixed(1) : '0';
+
+    const managerRevenueMap = salesManagers.reduce(
+      (acc, manager) => {
+        acc[manager.id] = {
+          managerId: manager.id,
+          name: `${manager.firstName} ${manager.lastName}`.trim(),
+          assemblyRevenue: 0,
+          packageRevenue: 0,
+        };
+        return acc;
+      },
+      {} as Record<
+        string,
+        { managerId: string; name: string; assemblyRevenue: number; packageRevenue: number }
+      >
+    );
+
+    const isPackageItem = (name: string | null | undefined) => {
+      const normalized = (name ?? '').trim().toLowerCase();
+      return normalized.includes('zip-lock') || normalized.includes('zip lock') || normalized.includes('пакет');
+    };
+
+    currentMonthOrdersWithItems.forEach((order) => {
+      const managerNameFromOrder = `${order.manager.firstName} ${order.manager.lastName}`.trim();
+      const managerBucket =
+        managerRevenueMap[order.managerId] ??
+        (managerRevenueMap[order.managerId] = {
+          managerId: order.managerId,
+          name: managerNameFromOrder || 'Менеджер',
+          assemblyRevenue: 0,
+          packageRevenue: 0,
+        });
+
+      const packageItemsRevenue = order.items.reduce((sum, item) => {
+        if (!isPackageItem(item.name)) return sum;
+        return sum + Number(item.price || 0);
+      }, 0);
+      const itemsTotalRevenue = order.items.reduce((sum, item) => sum + Number(item.price || 0), 0);
+      const orderTotalRevenue = Number(order.totalAmount || 0);
+      const hasItemsBreakdown = itemsTotalRevenue > 0;
+
+      if (!hasItemsBreakdown) {
+        managerBucket.assemblyRevenue += orderTotalRevenue;
+        return;
+      }
+
+      const clampedPackageRevenue = Math.max(0, Math.min(packageItemsRevenue, itemsTotalRevenue));
+      const packageShare = itemsTotalRevenue > 0 ? clampedPackageRevenue / itemsTotalRevenue : 0;
+      const packageRevenue = orderTotalRevenue * packageShare;
+      const assemblyRevenue = orderTotalRevenue - packageRevenue;
+
+      managerBucket.packageRevenue += packageRevenue;
+      managerBucket.assemblyRevenue += assemblyRevenue;
+    });
+
+    const managerRevenue = Object.values(managerRevenueMap).map((manager) => ({
+      ...manager,
+      assemblyRevenue: Number(manager.assemblyRevenue.toFixed(2)),
+      packageRevenue: Number(manager.packageRevenue.toFixed(2)),
+    }));
 
     res.json({
       leads: {
@@ -87,6 +267,15 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
       },
       revenue: {
         total: Number(totalRevenue._sum.totalAmount || 0),
+      },
+      currentMonth: {
+        ordersTotal: currentMonthOrders,
+        revenueTotal: Number(currentMonthOrderStats._sum.totalAmount || 0),
+        averageCheck: Number(currentMonthOrderStats._avg.totalAmount || 0),
+        producedUnitsTotal: Number(currentMonthProducedUnits._sum.quantity || 0),
+        leadsTotal: currentMonthLeads.length,
+        leadsBySource: currentMonthLeadBySource,
+        managerRevenue,
       },
     });
   } catch (error) {

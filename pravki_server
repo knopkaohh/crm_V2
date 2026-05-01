@@ -1,0 +1,80 @@
+# PRAVKI SERVER
+
+Как работаем с правками CRM:
+
+1) Я правлю код локально в `C:\Users\anton\OneDrive\Desktop\crm_v2`.
+2) Ты решаешь, когда выкатывать (можно не после каждой правки).
+3) На ПК отправляешь изменения в GitHub.
+4) На сервере подтягиваешь и запускаешь деплой-скрипт.
+
+---
+
+## Команды на ПК (после пакета правок)
+
+```bash
+cd C:\Users\anton\OneDrive\Desktop\crm_v2
+git add .
+git commit -m "описание правок"
+git push
+```
+
+---
+
+## Команды на сервере (основной сценарий)
+
+```bash
+cd /root/crm_v2
+git stash push -u -m "server-local-before-pull"
+git pull origin main
+SKIP_NPM_CI=1 SKIP_PULL=1 ./scripts/deploy.sh
+```
+
+Почему `SKIP_NPM_CI=1`: чтобы не перегружать сервер лишней переустановкой зависимостей.
+
+---
+
+## Когда НЕ ставить `SKIP_NPM_CI=1`
+
+Если менялись:
+- `backend/package.json`
+- `backend/package-lock.json`
+- `frontend/package.json`
+- `frontend/package-lock.json`
+
+Тогда запускай:
+
+```bash
+cd /root/crm_v2
+SKIP_PULL=1 ./scripts/deploy.sh
+```
+
+---
+
+## Проверка после деплоя
+
+```bash
+pm2 status
+curl -sI https://crm-bm.ru/login | head -5
+```
+
+Ожидаемо: оба процесса `crm-backend` и `crm-frontend` в статусе `online`, сайт отвечает `200`.
+
+---
+
+## Если `git pull` ругается на локальные изменения
+
+```bash
+cd /root/crm_v2
+git stash push -u -m "server-local-before-pull"
+git pull origin main
+```
+
+---
+
+## Триггер-фраза для новых чатов
+
+Пиши в начале:
+
+`Проект crm_v2. После правок дай команды: ПК (git add/commit/push) и сервер (git pull + deploy.sh).`
+
+Это гарантирует тот же процесс деплоя в любом новом чате.
