@@ -89,6 +89,22 @@ sudo apt-get install -y fonts-dejavu-core libreoffice-writer-nogui
 
 `LIBREOFFICE_PATH=/usr/bin/soffice` — или полный путь из `ls /usr/bin/soffice /usr/lib/libreoffice/program/soffice`.
 
+### Шрифт Century Gothic в PDF из шаблона Word
+
+PDF собирает **LibreOffice на сервере**. Если системный Fontconfig **не знает** Century Gothic, подставляется похожий шрифт — внешне «не тот».
+
+**Century Gothic нет** в `fonts-dejavu-core` и в типичном `ttf-mscorefonts-installer` (там другой набор Arial/Times и т.д.). Нужно **положить файлы `.ttf`** шрифта (по лицензии у вас они часто уже есть с ПК под Windows, имена вроде `GOTHIC.TTF`, `GOTHICB.TTF`, `GOTHICI.TTF`, `GOTHICBI.TTF`) на сервер и обновить кэш:
+
+```bash
+sudo mkdir -p /usr/local/share/fonts/century-gothic
+sudo cp /путь/откуда/скопировали/*.ttf /usr/local/share/fonts/century-gothic/
+sudo chmod 644 /usr/local/share/fonts/century-gothic/*.ttf
+sudo fc-cache -fv
+fc-list | grep -i 'century gothic\|Gothic'
+```
+
+После этого снова сформируй счёт (перезапуск PM2 обычно не нужен). Если в выводе `fc-list` шрифт не виден — проверь права на файлы и путь.
+
 Убедиться, что в репозитории на сервере есть каталог `backend/templates/` с `.docx` шаблоном счёта.
 
 Опционально в `.env` бэкенда:
