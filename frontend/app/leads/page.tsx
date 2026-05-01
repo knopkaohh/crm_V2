@@ -18,7 +18,7 @@ import {
   Plus,
   Calendar,
   Phone,
-  User,
+  User as UserIcon,
   Clock,
   Loader2,
   X,
@@ -1143,7 +1143,7 @@ export default function LeadsPage() {
             <div>
               <div className="flex items-center gap-3">
                 <span className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
-                  <User className="h-3.5 w-3.5 text-gray-500" />
+                  <UserIcon className="h-3.5 w-3.5 text-gray-500" />
                   <span>{managerName}</span>
                 </span>
                 {lead.nextContactDate ? (

@@ -35,14 +35,13 @@ interface ManagerStat {
 }
 
 const MANAGERS: ManagerStat[] = [
-  { name: 'Роман Хрусталёв', shortName: 'Роман', assemblyRevenue: 880000, packageRevenue: 180000 },
-  { name: 'Гинтарас Палтарацкас', shortName: 'Гинтар', assemblyRevenue: 760000, packageRevenue: 95000 },
-  { name: 'Георгий Мониава', shortName: 'Георгий', assemblyRevenue: 710000, packageRevenue: 85000 },
-  { name: 'Антон Федотов', shortName: 'Антон', assemblyRevenue: 8000000, packageRevenue: 2000000 },
-  { name: 'Никита Царьков', shortName: 'Никита', assemblyRevenue: 690000, packageRevenue: 70000 },
-  { name: 'Нариман Алескеров', shortName: 'Нариман', assemblyRevenue: 740000, packageRevenue: 90000 },
-  { name: 'Максим Шалагинов', shortName: 'Максим', assemblyRevenue: 630000, packageRevenue: 55000 },
-  { name: 'Владислав Пендус', shortName: 'Влад', assemblyRevenue: 670000, packageRevenue: 65000 },
+  { name: 'Роман Хрусталёв', shortName: 'Роман', assemblyRevenue: 0, packageRevenue: 0 },
+  { name: 'Гинтарас Палтарацкас', shortName: 'Гинтар', assemblyRevenue: 0, packageRevenue: 0 },
+  { name: 'Георгий Мониава', shortName: 'Георгий', assemblyRevenue: 0, packageRevenue: 0 },
+  { name: 'Антон Федотов', shortName: 'Антон', assemblyRevenue: 0, packageRevenue: 0 },
+  { name: 'Никита Царьков', shortName: 'Никита', assemblyRevenue: 0, packageRevenue: 0 },
+  { name: 'Нариман Алескеров', shortName: 'Нариман', assemblyRevenue: 0, packageRevenue: 0 },
+  { name: 'Максим Шалагинов', shortName: 'Максим', assemblyRevenue: 0, packageRevenue: 0 },
 ]
 
 const YEAR_REVENUE = [
@@ -160,7 +159,6 @@ export default function DashboardPage() {
       'Никита Царьков': 200000,
       'Нариман Алескеров': 250000,
       'Максим Шалагинов': 50000,
-      'Владислав Пендус': 50000,
     }
     return defaults[name] ?? 600000
   }

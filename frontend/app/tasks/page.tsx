@@ -195,34 +195,35 @@ export default function TasksPage() {
                 {tasks.map((task) => {
                   const isOverdue =
                     task.dueDate && new Date(task.dueDate) < new Date() && task.status !== 'COMPLETED'
+                  const description = task.description ?? ''
                   return (
                     <tr key={task.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <Link href={`/tasks/${task.id}`} className="block">
                           <div className="text-sm font-medium text-gray-900">{task.title}</div>
-                          {task.description && (
+                          {description && (
                             <div className="text-sm text-gray-500 mt-1 line-clamp-1">
-                              {task.description.includes('Клиент:') ? (
+                              {description.includes('Клиент:') ? (
                                 <>
-                                  {task.description.split('Клиент:')[0]}
+                                  {description.split('Клиент:')[0]}
                                   <Link
                                     href={`/clients`}
                                     onClick={(e) => {
                                       e.preventDefault()
                                       e.stopPropagation()
                                       // Try to find client by name in description
-                                      const clientName = task.description.split('Клиент:')[1]?.trim()
+                                      const clientName = description.split('Клиент:')[1]?.trim()
                                       if (clientName) {
                                         window.location.href = `/clients?search=${encodeURIComponent(clientName)}`
                                       }
                                     }}
                                     className="text-primary-600 hover:text-primary-800 font-medium"
                                   >
-                                    {task.description.split('Клиент:')[1]}
+                                    {description.split('Клиент:')[1]}
                                   </Link>
                                 </>
                               ) : (
-                                task.description
+                                description
                               )}
                             </div>
                           )}
