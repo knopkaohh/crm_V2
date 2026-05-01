@@ -197,6 +197,107 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
+// Генерация PDF счета (выше /:id, чтобы не перехватывалось общим маршрутом)
+router.get('/:id/invoice', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+
+    const order = await prisma.order.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        managerId: true,
+        orderNumber: true,
+        totalAmount: true,
+        client: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            email: true,
+            company: true,
+            address: true,
+            contactMethod: true,
+            telegram: true,
+          },
+        },
+        manager: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        items: {
+          select: {
+            id: true,
+            name: true,
+            quantity: true,
+            price: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+
+    if (!order) {
+      return res.status(404).json({ error: 'Заказ не найден' });
+    }
+
+    if (
+      req.userRole === 'SALES_MANAGER' &&
+      order.managerId !== req.userId
+    ) {
+      return res.status(403).json({ error: 'Недостаточно прав доступа' });
+    }
+
+    const rawTimeout = parseInt(process.env.INVOICE_GENERATION_TIMEOUT_MS || '90000', 10);
+    const timeoutMs = Math.min(Math.max(Number.isFinite(rawTimeout) ? rawTimeout : 90000, 5000), 300000);
+
+    const pdfBuffer = await Promise.race([
+      generateInvoicePDF({
+        order: order as any,
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Генерация счёта превысила ${timeoutMs} мс (увеличьте INVOICE_GENERATION_TIMEOUT_MS или используйте INVOICE_SIMPLE_FIRST=1 / INVOICE_SIMPLE_PDF=1)`,
+              ),
+            ),
+          timeoutMs,
+        ),
+      ),
+    ]);
+
+    const today = new Date();
+    const formattedDate = today.toLocaleDateString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+    const fileName = `Счёт №${order.orderNumber} от ${formattedDate}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    );
+    res.send(pdfBuffer);
+  } catch (error: any) {
+    console.error('Generate invoice error:', error);
+    console.error('Error details:', {
+      message: error?.message,
+      stack: error?.stack,
+    });
+    res.status(500).json({
+      error: 'Ошибка при генерации счета',
+      details: error?.message || 'Неизвестная ошибка',
+    });
+  }
+});
+
 // Получить заказ по ID
 router.get('/:id', authenticate, async (req: AuthRequest, res) => {
   try {
@@ -338,94 +439,6 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Get order error:', error);
     res.status(500).json({ error: 'Ошибка при получении заказа' });
-  }
-});
-
-// Генерация PDF счета
-router.get('/:id/invoice', authenticate, async (req: AuthRequest, res) => {
-  try {
-    const { id } = req.params;
-
-    const order = await prisma.order.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        managerId: true,
-        orderNumber: true,
-        totalAmount: true,
-        client: {
-          select: {
-            id: true,
-            name: true,
-            phone: true,
-            email: true,
-            company: true,
-            address: true,
-            contactMethod: true,
-            telegram: true,
-          },
-        },
-        manager: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        items: {
-          select: {
-            id: true,
-            name: true,
-            quantity: true,
-            price: true,
-          },
-          orderBy: { createdAt: 'asc' },
-        },
-      },
-    });
-
-    if (!order) {
-      return res.status(404).json({ error: 'Заказ не найден' });
-    }
-
-    // Проверка прав доступа
-    if (
-      req.userRole === 'SALES_MANAGER' &&
-      order.managerId !== req.userId
-    ) {
-      return res.status(403).json({ error: 'Недостаточно прав доступа' });
-    }
-
-    // Генерируем PDF
-    const pdfBuffer = await generateInvoicePDF({ 
-      order: order as any // Приведение типа для совместимости
-    });
-
-    // Формируем имя файла: Счёт №{номер} от {дата}
-    const today = new Date();
-    const formattedDate = today.toLocaleDateString('ru-RU', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-    const fileName = `Счёт №${order.orderNumber} от ${formattedDate}.pdf`;
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`
-    );
-    res.send(pdfBuffer);
-  } catch (error: any) {
-    console.error('Generate invoice error:', error);
-    console.error('Error details:', {
-      message: error?.message,
-      stack: error?.stack,
-    });
-    res.status(500).json({ 
-      error: 'Ошибка при генерации счета',
-      details: error?.message || 'Неизвестная ошибка'
-    });
   }
 });
 

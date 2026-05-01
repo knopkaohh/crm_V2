@@ -77,6 +77,8 @@ sudo apt-get install -y fonts-dejavu-core libreoffice-writer-nogui
 Опционально в `.env` бэкенда:
 
 - `INVOICE_SIMPLE_PDF=1` — всегда упрощённый счёт через pdfkit (без Word/LibreOffice).
+- `INVOICE_SIMPLE_FIRST=1` — сначала pdfkit, при ошибке — Word/LibreOffice (удобно против зависаний 502).
+- `INVOICE_GENERATION_TIMEOUT_MS=90000` — лимит генерации счёта в мс (ответ 500 с текстом вместо «вечного» запроса и 502 от nginx).
 - `INVOICE_PDF_FONT=/полный/путь/к/DejaVuSans.ttf` — если шрифт не находится автоматически.
 
 Для nginx при долгой генерации можно поднять таймауты для `location /api/` (`proxy_read_timeout` и т.п.).

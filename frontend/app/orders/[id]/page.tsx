@@ -450,9 +450,22 @@ export default function OrderDetailPage() {
       a.click()
       a.remove()
       window.URL.revokeObjectURL(url)
-    } catch (e) {
+    } catch (e: unknown) {
       console.error('Invoice download failed:', e)
-      alert('Не удалось скачать счёт')
+      let msg = 'Не удалось скачать счёт'
+      const ax = e as { response?: { data?: Blob | unknown; status?: number } }
+      const data = ax?.response?.data
+      if (data instanceof Blob && data.size > 0 && data.size < 65536) {
+        try {
+          const text = await data.text()
+          const j = JSON.parse(text) as { details?: string; error?: string }
+          if (j.details) msg = `${msg}: ${j.details}`
+          else if (j.error) msg = `${msg}: ${j.error}`
+        } catch {
+          /* не JSON — например HTML от nginx при 502 */
+        }
+      }
+      alert(msg)
     } finally {
       setInvoiceDownloading(false)
     }
@@ -593,27 +606,11 @@ export default function OrderDetailPage() {
                   </>
                 )}
                 <button
-                  type="button"
-                  onClick={() => void handleDownloadInvoice()}
-                  disabled={invoiceDownloading}
-                  className="px-4 py-2 border border-gray-300 text-gray-800 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2 disabled:opacity-50"
+                  onClick={() => router.back()}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                 >
-                  <FileDown className="h-4 w-4" />
-                  {invoiceDownloading ? 'Формируем…' : 'Скачать счёт'}
+                  Назад
                 </button>
-                <button
-                  onClick={() => setIsEditing(true)}
-                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2"
-                >
-                  <Edit2 className="h-4 w-4" />
-                  Редактировать
-                </button>
-          <button
-            onClick={() => router.back()}
-            className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            Назад
-          </button>
               </>
             )}
           </div>
@@ -621,6 +618,27 @@ export default function OrderDetailPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-xl shadow-primary-900/5 space-y-4 md:col-span-2">
+            {!isEditing && (
+              <div className="flex flex-wrap items-center justify-end gap-2 pb-4 border-b border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => void handleDownloadInvoice()}
+                  disabled={invoiceDownloading}
+                  className="px-4 py-2 border border-gray-300 text-gray-800 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  <FileDown className="h-4 w-4 shrink-0" />
+                  {invoiceDownloading ? 'Формируем…' : 'Скачать счёт'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(true)}
+                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2"
+                >
+                  <Edit2 className="h-4 w-4 shrink-0" />
+                  Редактировать
+                </button>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <div className="flex-1">
                 <p className="text-sm text-gray-500 mb-2">Клиент</p>

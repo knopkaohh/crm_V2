@@ -96,17 +96,18 @@ export function resolveCyrillicFontPath(): string | null {
   return null;
 }
 
+/** Для Helvetica без встроенной кириллицы — только безопасные для PDF символы */
+function toAsciiPdfSafe(s: string): string {
+  return (s || '').replace(/[^\x20-\x7E]/g, '?');
+}
+
 /**
  * Упрощённый счёт без Word/LibreOffice — для серверов без GUI и для fallback при ошибке шаблона.
+ * Если нет TTF с кириллицей — Helvetica и ASCII-safe текст (кириллица станет «?»); лучше поставить fonts-dejavu-core или INVOICE_PDF_FONT.
  */
 export async function generateInvoicePdfSimple(data: InvoiceData): Promise<Buffer> {
   const fontPath = resolveCyrillicFontPath();
-  if (!fontPath) {
-    throw new Error(
-      'Нет TTF-шрифта с кириллицей для PDF. На сервере: apt-get install -y fonts-dejavu-core ' +
-        'или задайте INVOICE_PDF_FONT=/полный/путь/к/DejaVuSans.ttf. Альтернатива: apt install libreoffice-writer-nogui',
-    );
-  }
+  const useCyrillicFont = Boolean(fontPath);
 
   const order = data.order;
   const client = order.client;
@@ -121,42 +122,84 @@ export async function generateInvoicePdfSimple(data: InvoiceData): Promise<Buffe
     ? `${order.manager.firstName} ${order.manager.lastName}`
     : '—';
 
+  const safe = (s: string) => (useCyrillicFont ? s : toAsciiPdfSafe(s));
+
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     const doc = new PDFDocument({ size: 'A4', margin: 48 });
-    doc.registerFont('inv', fontPath);
-    doc.font('inv');
     doc.on('data', (c: Buffer) => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(16).text(`Счёт № ${order.orderNumber}`, { align: 'center' });
-    doc.moveDown(0.5);
-    doc.fontSize(10).fillColor('#444').text(`Дата: ${today}`, { align: 'center' });
-    doc.fillColor('#000');
-    doc.moveDown(1.2);
-
-    doc.fontSize(11).text(`Клиент: ${client.name}`);
-    doc.text(`Телефон: ${formattedPhone}`);
-    if (client.company) doc.text(`Компания: ${client.company}`);
-    doc.text(`Менеджер: ${managerName}`);
-    doc.moveDown(1);
-
-    doc.fontSize(11).text('Позиции:', { underline: true });
-    doc.moveDown(0.5);
-    doc.fontSize(10);
-    for (const it of items) {
-      const line = it.name || 'Позиция';
-      const qty = it.quantity;
-      const sum = Number(it.price).toFixed(2);
-      doc.text(`${line} — ${qty} ед. — ${sum} ₽ (сумма по строке)`);
-      doc.moveDown(0.35);
+    if (useCyrillicFont) {
+      doc.registerFont('inv', fontPath!);
+      doc.font('inv');
+    } else {
+      doc.font('Helvetica');
+      console.warn(
+        '[invoice] pdfkit: нет шрифта с кириллицей — Helvetica + ASCII-safe (задайте INVOICE_PDF_FONT или fonts-dejavu-core)',
+      );
     }
 
-    doc.moveDown(0.5);
-    doc.moveTo(48, doc.y).lineTo(548, doc.y).stroke('#ccc');
-    doc.moveDown(0.5);
-    doc.fontSize(12).text(`Итого: ${Number(order.totalAmount).toFixed(2)} ₽`, { align: 'right' });
+    if (useCyrillicFont) {
+      doc.fontSize(16).text(`Счёт № ${order.orderNumber}`, { align: 'center' });
+      doc.moveDown(0.5);
+      doc.fontSize(10).fillColor('#444').text(`Дата: ${today}`, { align: 'center' });
+      doc.fillColor('#000');
+      doc.moveDown(1.2);
+
+      doc.fontSize(11).text(`Клиент: ${client.name}`);
+      doc.text(`Телефон: ${formattedPhone}`);
+      if (client.company) doc.text(`Компания: ${client.company}`);
+      doc.text(`Менеджер: ${managerName}`);
+      doc.moveDown(1);
+
+      doc.fontSize(11).text('Позиции:', { underline: true });
+      doc.moveDown(0.5);
+      doc.fontSize(10);
+      for (const it of items) {
+        const line = it.name || 'Позиция';
+        const qty = it.quantity;
+        const sum = Number(it.price).toFixed(2);
+        doc.text(`${line} — ${qty} ед. — ${sum} ₽ (сумма по строке)`);
+        doc.moveDown(0.35);
+      }
+
+      doc.moveDown(0.5);
+      doc.moveTo(48, doc.y).lineTo(548, doc.y).stroke('#ccc');
+      doc.moveDown(0.5);
+      doc.fontSize(12).text(`Итого: ${Number(order.totalAmount).toFixed(2)} ₽`, { align: 'right' });
+    } else {
+      doc.fontSize(16).text(`Invoice # ${safe(String(order.orderNumber))}`, { align: 'center' });
+      doc.moveDown(0.5);
+      doc.fontSize(10).fillColor('#444').text(`Date: ${safe(today)}`, { align: 'center' });
+      doc.fillColor('#000');
+      doc.moveDown(1.2);
+
+      doc.fontSize(11).text(`Client: ${safe(client.name)}`);
+      doc.text(`Phone: ${safe(formattedPhone)}`);
+      if (client.company) doc.text(`Company: ${safe(client.company)}`);
+      doc.text(`Manager: ${safe(managerName)}`);
+      doc.moveDown(1);
+
+      doc.fontSize(11).text('Line items:', { underline: true });
+      doc.moveDown(0.5);
+      doc.fontSize(10);
+      for (const it of items) {
+        const line = safe(it.name || 'Item');
+        const qty = it.quantity;
+        const sum = Number(it.price).toFixed(2);
+        doc.text(`${line} — qty ${qty} — ${sum} RUB (line total)`);
+        doc.moveDown(0.35);
+      }
+
+      doc.moveDown(0.5);
+      doc.moveTo(48, doc.y).lineTo(548, doc.y).stroke('#ccc');
+      doc.moveDown(0.5);
+      doc
+        .fontSize(12)
+        .text(`Total: ${Number(order.totalAmount).toFixed(2)} RUB`, { align: 'right' });
+    }
 
     doc.end();
   });
@@ -257,6 +300,15 @@ export async function generateInvoicePDF(data: InvoiceData): Promise<Buffer> {
   const simpleFlag = String(process.env.INVOICE_SIMPLE_PDF || '').toLowerCase();
   if (['1', 'true', 'yes'].includes(simpleFlag)) {
     return generateInvoicePdfSimple(data);
+  }
+
+  const simpleFirst = String(process.env.INVOICE_SIMPLE_FIRST || '').toLowerCase();
+  if (['1', 'true', 'yes'].includes(simpleFirst)) {
+    try {
+      return await generateInvoicePdfSimple(data);
+    } catch (e: any) {
+      console.warn('[invoice] INVOICE_SIMPLE_FIRST: упрощённый PDF не удался, пробуем DOCX:', e?.message || e);
+    }
   }
 
   const tempDir = path.join(__dirname, '../../temp');
