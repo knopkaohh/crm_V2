@@ -1,6 +1,8 @@
 /**
- * PDF счёта: на мобильных «Поделиться» из просмотра blob даёт blob:… и document.pdf.
- * Используем navigator.share({ files: [File] }) — тогда в Telegram/WhatsApp уходит нормальный файл и имя.
+ * PDF счёта на телефоне:
+ * - Прямой переход на blob:… в адресной строке выглядит как «ссылка», не как документ.
+ * - Открываем полноэкранный просмотр во вкладке about:blank + iframe с PDF.
+ * - Кнопка «Поделиться PDF» вызывает navigator.share({ files }) — в мессенджеры уходит файл, не blob URL.
  */
 
 export function isLikelyMobileDevice(): boolean {
@@ -11,7 +13,7 @@ export function isLikelyMobileDevice(): boolean {
   return false
 }
 
-/** Вызовите из обработчика клика ДО любого await — только на мобильных открывает вкладку-плейсхолдер под просмотр PDF. */
+/** Вызовите из обработчика клика ДО любого await — только на мобильных открывает вкладку под просмотр. */
 export function openInvoicePdfPlaceholderTab(): Window | null {
   if (!isLikelyMobileDevice()) return null
   const popup = window.open('about:blank', '_blank')
@@ -35,6 +37,63 @@ function sanitizeInvoiceFileName(name: string): string {
   return withPdf
 }
 
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+/** Вкладка остаётся обычной страницей; PDF внутри iframe — не blob в адресной строке. */
+function mountMobilePdfShell(win: Window, blobUrl: string, fileName: string): void {
+  const shareTitle = fileName.replace(/\.pdf$/i, '')
+  const doc = win.document
+  doc.open()
+  doc.write(`<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>${escapeHtml(fileName)}</title>
+<style>
+  html,body{margin:0;height:100%;background:#1a1a1a;}
+  #frame-wrap{position:fixed;top:0;left:0;right:0;bottom:calc(56px + env(safe-area-inset-bottom, 0px));}
+  iframe{border:0;width:100%;height:100%;display:block;background:#525659;}
+  #toolbar{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;justify-content:center;align-items:center;gap:10px;padding:10px;padding-bottom:max(10px, env(safe-area-inset-bottom));background:rgba(0,0,0,.88);backdrop-filter:blur(10px);}
+  #toolbar button{font:inherit;padding:12px 20px;border-radius:12px;border:0;background:#EDC147;color:#1a1a1a;font-weight:700;}
+</style>
+</head>
+<body>
+<div id="frame-wrap"><iframe id="pdf" title="${escapeHtml(fileName)}"></iframe></div>
+<div id="toolbar"><button type="button" id="shareBtn">Поделиться PDF</button></div>
+<script>
+(function () {
+  var blobUrl = ${JSON.stringify(blobUrl)};
+  var fn = ${JSON.stringify(fileName)};
+  var stitle = ${JSON.stringify(shareTitle)};
+  var iframe = document.getElementById('pdf');
+  if (iframe) iframe.src = blobUrl;
+  var btn = document.getElementById('shareBtn');
+  if (!btn) return;
+  btn.addEventListener('click', async function () {
+    try {
+      var res = await fetch(blobUrl);
+      var blob = await res.blob();
+      var pdfBlob = blob.type === 'application/pdf' ? blob : new Blob([blob], { type: 'application/pdf' });
+      var file = new File([pdfBlob], fn, { type: 'application/pdf', lastModified: Date.now() });
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: stitle });
+      } else {
+        alert('Отправка файла недоступна. Используйте «Поделиться страницей» в меню браузера или сохраните счёт с компьютера.');
+      }
+    } catch (e) {
+      if (!e || e.name !== 'AbortError') alert('Не удалось открыть окно «Поделиться»');
+    }
+  });
+})();
+</script>
+</body>
+</html>`)
+  doc.close()
+}
+
 function isShareDismissed(err: unknown): boolean {
   if (err instanceof DOMException && err.name === 'AbortError') return true
   if (typeof err === 'object' && err !== null && 'name' in err && (err as { name: string }).name === 'AbortError') {
@@ -43,7 +102,6 @@ function isShareDismissed(err: unknown): boolean {
   return false
 }
 
-/** После получения Blob: на телефоне сначала системное «Поделиться» с корректным именем файла; при отмене — просмотр PDF во вкладке. */
 export async function showInvoicePdfFromBlob(
   blob: Blob,
   fileName: string,
@@ -51,6 +109,20 @@ export async function showInvoicePdfFromBlob(
 ): Promise<void> {
   const safeName = sanitizeInvoiceFileName(fileName)
   const pdfBlob = blob.type === 'application/pdf' ? blob : new Blob([blob], { type: 'application/pdf' })
+
+  if (isLikelyMobileDevice() && placeholderTab && !placeholderTab.closed) {
+    const url = URL.createObjectURL(pdfBlob)
+    mountMobilePdfShell(placeholderTab, url, safeName)
+    const revokeLater = () => window.setTimeout(() => URL.revokeObjectURL(url), 600_000)
+    try {
+      placeholderTab.addEventListener('pagehide', revokeLater)
+    } catch {
+      revokeLater()
+    }
+    return
+  }
+
+  const url = URL.createObjectURL(pdfBlob)
   const file = new File([pdfBlob], safeName, { type: 'application/pdf', lastModified: Date.now() })
 
   let canShareFiles = false
@@ -70,26 +142,13 @@ export async function showInvoicePdfFromBlob(
         files: [file],
         title: safeName.replace(/\.pdf$/i, ''),
       })
-      try {
-        placeholderTab?.close()
-      } catch {
-        /* ignore */
-      }
+      URL.revokeObjectURL(url)
       return
     } catch (err: unknown) {
       if (!isShareDismissed(err)) {
         console.warn('navigator.share:', err)
       }
-      /* Отмена или ошибка — ниже открываем просмотр */
     }
-  }
-
-  const url = URL.createObjectURL(pdfBlob)
-
-  if (placeholderTab && !placeholderTab.closed) {
-    placeholderTab.location.href = url
-    window.setTimeout(() => URL.revokeObjectURL(url), 180_000)
-    return
   }
 
   const a = document.createElement('a')
@@ -103,9 +162,9 @@ export async function showInvoicePdfFromBlob(
 
   if (isLikelyMobileDevice() && !placeholderTab) {
     window.alert(
-      'Не удалось открыть новую вкладку — возможно, заблокированы всплывающие окна. Разрешите их для сайта или сохраните счёт с компьютера.',
+      'Не удалось открыть вкладку со счётом. Разрешите всплывающие окна для сайта или откройте заказ с компьютера.',
     )
   }
 
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  window.setTimeout(() => URL.revokeObjectURL(url), 120_000)
 }
