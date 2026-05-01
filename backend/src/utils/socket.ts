@@ -1,6 +1,7 @@
 import { io } from '../server';
 import { prisma } from './prisma';
 import { sendTelegramToUsers } from './telegram';
+import { UserRole } from '@prisma/client';
 
 export const sendNotification = async (
   userId: string,
@@ -27,7 +28,7 @@ export const sendNotification = async (
 };
 
 /** Список ID активных пользователей по ролям (например, только менеджеры). */
-export const getActiveUserIdsByRoles = async (roles: string[]): Promise<string[]> => {
+export const getActiveUserIdsByRoles = async (roles: UserRole[]): Promise<string[]> => {
   const users = await prisma.user.findMany({
     where: { isActive: true, role: { in: roles } },
     select: { id: true },

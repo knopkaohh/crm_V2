@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { prisma } from './prisma';
+import type { Prisma } from '@prisma/client';
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org';
 
@@ -97,7 +98,7 @@ export const sendTelegramToUsers = async (
   if (!token) return;
 
   try {
-    const where: { isActive: boolean; telegramChatId: unknown; telegramNotificationsEnabled?: boolean } = {
+    const where: Prisma.UserWhereInput = {
       isActive: true,
       telegramChatId: { not: null },
       telegramNotificationsEnabled: true,

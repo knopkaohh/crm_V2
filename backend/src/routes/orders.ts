@@ -323,6 +323,7 @@ router.get('/:id/invoice', authenticate, async (req: AuthRequest, res) => {
       where: { id },
       select: {
         id: true,
+        managerId: true,
         orderNumber: true,
         totalAmount: true,
         client: {
