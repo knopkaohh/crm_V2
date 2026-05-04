@@ -6,8 +6,8 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
+import { downloadProtectedFile } from '@/lib/downloadProtectedFile'
 import { openInvoicePdfPlaceholderTab, showInvoicePdfFromBlob } from '@/lib/openInvoicePdf'
-import { getApiBaseUrl } from '@/lib/url'
 import { Edit2, Save, Trash2, X as XIcon, FileDown } from 'lucide-react'
 
 // Lazy loading для модального окна
@@ -145,6 +145,7 @@ export default function OrderDetailPage() {
   const [designComment, setDesignComment] = useState('')
   const [uploadingFile, setUploadingFile] = useState(false)
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null)
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null)
   const [showProductionModal, setShowProductionModal] = useState(false)
   
   // Режим редактирования
@@ -402,6 +403,20 @@ export default function OrderDetailPage() {
       alert('Не удалось удалить файл')
     } finally {
       setDeletingFileId(null)
+    }
+  }
+
+  const handleDownloadDesignFile = async (fileId: string, originalName: string) => {
+    setDownloadingFileId(fileId)
+    try {
+      await downloadProtectedFile(fileId, originalName)
+    } catch (error: unknown) {
+      console.error('Failed to download file:', error)
+      const message =
+        error instanceof Error ? error.message : 'Не удалось скачать файл'
+      alert(message)
+    } finally {
+      setDownloadingFileId(null)
     }
   }
 
@@ -1126,14 +1141,16 @@ export default function OrderDetailPage() {
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <a
-                            href={`${getApiBaseUrl()}/files/${file.id}/download`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-3 py-1 text-sm bg-primary-600 text-white rounded hover:bg-primary-700"
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleDownloadDesignFile(file.id, file.originalName)
+                            }
+                            disabled={downloadingFileId === file.id}
+                            className="px-3 py-1 text-sm bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            Скачать
-                          </a>
+                            {downloadingFileId === file.id ? 'Скачивание…' : 'Скачать'}
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleDeleteDesignFile(file.id)}

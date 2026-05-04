@@ -222,6 +222,7 @@ const WEEKDAY_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const FILTER_SOURCE_OPTIONS = [
   'Avito',
   'Сайт',
+  'Почта',
   'Проектные продажи',
   'Теплые обзвоны',
   'Постоянные клиенты',
@@ -1704,6 +1705,7 @@ export default function LeadsPage() {
                           >
                             <option value="Avito">Avito</option>
                             <option value="Сайт">Сайт</option>
+                            <option value="Почта">Почта</option>
                             <option value="Проектные продажи">Проектные продажи</option>
                             <option value="Теплые обзвоны">Теплые обзвоны</option>
                             <option value="Постоянные клиенты">Постоянные клиенты</option>

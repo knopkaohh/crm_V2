@@ -204,6 +204,7 @@ router.get('/:id/download', authenticate, async (req, res) => {
       where: { id },
       include: {
         lead: { select: { managerId: true } },
+        order: { select: { managerId: true } },
       },
     });
 
@@ -213,6 +214,16 @@ router.get('/:id/download', authenticate, async (req, res) => {
 
     if (file.leadId && file.lead && !canAccessLeadByManager(req as AuthRequest, file.lead.managerId)) {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
+    }
+
+    const authReq = req as AuthRequest;
+    if (file.orderId) {
+      if (!file.order) {
+        return res.status(404).json({ error: 'Файл не найден' });
+      }
+      if (authReq.userRole === 'SALES_MANAGER' && file.order.managerId !== authReq.userId) {
+        return res.status(403).json({ error: 'Недостаточно прав доступа' });
+      }
     }
 
     try {

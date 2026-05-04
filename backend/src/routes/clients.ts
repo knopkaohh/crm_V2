@@ -471,16 +471,19 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
   try {
     const { name, company, email, phone, whatsapp, address, notes, contactMethod, telegram } = req.body;
 
-    if (!name || !phone) {
-      return res.status(400).json({ error: 'Имя и телефон обязательны' });
+    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    if (!trimmedName) {
+      return res.status(400).json({ error: 'Имя обязательно' });
     }
+    const normalizedPhone =
+      phone != null && String(phone).trim() !== '' ? String(phone).trim() : '';
 
     const client = await prisma.client.create({
       data: {
-        name,
+        name: trimmedName,
         company,
         email,
-        phone,
+        phone: normalizedPhone,
         whatsapp,
         address,
         notes,

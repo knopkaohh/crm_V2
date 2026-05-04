@@ -254,6 +254,12 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
       packageRevenue: Number(manager.packageRevenue.toFixed(2)),
     }));
 
+    /** Текущий список активных менеджеров продаж (те же границы доступа, что у блока выручки) — для планов и клиентов без угадывания ФИО */
+    const salesManagersPayload = salesManagers.map((m) => ({
+      managerId: m.id,
+      name: `${m.firstName} ${m.lastName}`.trim(),
+    }));
+
     res.json({
       leads: {
         total: totalLeads,
@@ -274,6 +280,7 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
       revenue: {
         total: Number(totalRevenue._sum.totalAmount || 0),
       },
+      salesManagers: salesManagersPayload,
       currentMonth: {
         ordersTotal: currentMonthOrders,
         revenueTotal: Number(currentMonthOrderStats._sum.totalAmount || 0),
@@ -328,14 +335,43 @@ router.post('/manager-plans', authenticate, requireRole('EXECUTIVE', 'ADMIN'), a
       return res.status(400).json({ error: 'Передайте period (YYYY-MM) и массив plans' });
     }
 
-    const normalizedPlans = plans
+    const rawPlans = plans
       .map((plan: any) => ({
-        managerId: typeof plan?.managerId === 'string' ? plan.managerId : '',
+        managerId: typeof plan?.managerId === 'string' ? plan.managerId.trim() : '',
         planAmount: Number(plan?.planAmount ?? 0),
       }))
       .filter((plan: { managerId: string; planAmount: number }) =>
         Boolean(plan.managerId) && Number.isFinite(plan.planAmount) && plan.planAmount >= 0
       );
+
+    const planByManager = new Map<string, number>();
+    for (const row of rawPlans) {
+      planByManager.set(row.managerId, row.planAmount);
+    }
+    const normalizedPlans = [...planByManager.entries()].map(([managerId, planAmount]) => ({
+      managerId,
+      planAmount,
+    }));
+
+    const managerIds = normalizedPlans.map((p) => p.managerId);
+    if (managerIds.length > 0) {
+      const validManagers = await prisma.user.findMany({
+        where: {
+          id: { in: managerIds },
+          role: 'SALES_MANAGER',
+          isActive: true,
+        },
+        select: { id: true },
+      });
+      const allowed = new Set(validManagers.map((u) => u.id));
+      const unknown = managerIds.filter((id) => !allowed.has(id));
+      if (unknown.length > 0) {
+        console.warn('POST /manager-plans: invalid manager ids', unknown);
+        return res.status(400).json({
+          error: 'В плане указаны неизвестные или неактивные менеджеры продаж',
+        });
+      }
+    }
 
     await prisma.$transaction([
       prisma.monthlyManagerPlan.deleteMany({ where: { period } }),

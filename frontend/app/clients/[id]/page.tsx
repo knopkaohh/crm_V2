@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
-import { getApiBaseUrl } from '@/lib/url'
+import { downloadProtectedFile } from '@/lib/downloadProtectedFile'
 import { File, Send, X, Sparkles, Clock3, ShoppingCart, MessageCircle, UserX, UserPlus, UserCheck } from 'lucide-react'
 
 interface Comment {
@@ -89,6 +89,7 @@ export default function ClientDetailPage() {
   const [activeTab, setActiveTab] = useState<'orders' | 'history' | 'files'>('orders')
   const [newComment, setNewComment] = useState('')
   const [uploadingFile, setUploadingFile] = useState(false)
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null)
   const [closeModalOpen, setCloseModalOpen] = useState(false)
   const [closeReason, setCloseReason] = useState('')
   const [closeNotes, setCloseNotes] = useState('')
@@ -217,6 +218,20 @@ export default function ClientDetailPage() {
       alert('Не удалось загрузить файл')
     } finally {
       setUploadingFile(false)
+    }
+  }
+
+  const handleDownloadClientFile = async (fileId: string, originalName: string) => {
+    setDownloadingFileId(fileId)
+    try {
+      await downloadProtectedFile(fileId, originalName)
+    } catch (error: unknown) {
+      console.error('Failed to download file:', error)
+      const message =
+        error instanceof Error ? error.message : 'Не удалось скачать файл'
+      alert(message)
+    } finally {
+      setDownloadingFileId(null)
     }
   }
 
@@ -746,14 +761,16 @@ export default function ClientDetailPage() {
                           </p>
                         </div>
                       </div>
-                      <a
-                        href={`${getApiBaseUrl()}/files/${file.id}/download`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1 text-sm bg-primary-600 text-white rounded hover:bg-primary-700"
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDownloadClientFile(file.id, file.originalName)
+                        }
+                        disabled={downloadingFileId === file.id}
+                        className="px-3 py-1 text-sm bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Скачать
-                      </a>
+                        {downloadingFileId === file.id ? 'Скачивание…' : 'Скачать'}
+                      </button>
                     </div>
                   ))}
                   {allFiles.length === 0 && (

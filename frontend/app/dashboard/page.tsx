@@ -25,6 +25,8 @@ interface DashboardData {
   revenue: {
     total: number
   }
+  /** Активные менеджеры продаж (как на сервере) — порядок и id для планов */
+  salesManagers?: Array<{ managerId: string; name: string }>
   currentMonth: {
     ordersTotal: number
     revenueTotal: number
@@ -77,6 +79,24 @@ const getCurrentMonthInput = () => {
   return `${now.getFullYear()}-${month}`
 }
 
+/** Сравнение «Иван Петров» / «Петров Иван» для привязки строк таблицы к данным API и сохранения плана по managerId */
+function normalizePersonNameKey(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort()
+    .join('|')
+}
+
+function findMatchingApiManager<
+  T extends { managerId: string; name: string },
+>(apiManagers: T[], candidateDisplayName: string): T | undefined {
+  const key = normalizePersonNameKey(candidateDisplayName)
+  return apiManagers.find((m) => normalizePersonNameKey(m.name) === key)
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -97,7 +117,10 @@ export default function DashboardPage() {
 
   const loadPlansForPeriod = async (period: string) => {
     try {
-      const response = await api.get('/analytics/manager-plans', { params: { period } })
+      const response = await api.get('/analytics/manager-plans', {
+        params: { period },
+        headers: { 'X-Skip-Cache': 'true' },
+      })
       const entries = Array.isArray(response.data?.plans) ? response.data.plans : []
       const mapped = entries.reduce((acc: Record<string, number>, item: { managerId: string; planAmount: number }) => {
         acc[item.managerId] = Number(item.planAmount || 0)
@@ -120,28 +143,58 @@ export default function DashboardPage() {
     setIsPlanModalOpen(true)
   }
 
+  const resolveManagerIdForPlan = (manager: {
+    managerId?: string
+    name: string
+  }): string | undefined => {
+    if (manager.managerId) return manager.managerId
+    const fromRegistry = data?.salesManagers?.find(
+      (m) => normalizePersonNameKey(m.name) === normalizePersonNameKey(manager.name),
+    )
+    if (fromRegistry) return fromRegistry.managerId
+    const fromRevenue = data?.currentMonth?.managerRevenue?.find(
+      (m) => normalizePersonNameKey(m.name) === normalizePersonNameKey(manager.name),
+    )
+    return fromRevenue?.managerId
+  }
+
   const applyDraftPlans = async () => {
     const payloadPlans = managerRows
-      .filter((manager) => Boolean(manager.managerId))
       .map((manager) => {
+        const managerId = resolveManagerIdForPlan(manager)
+        if (!managerId) return null
         const key = getManagerPlanKey(manager)
         return {
-          managerId: manager.managerId as string,
+          managerId,
           planAmount: Number(draftPlans[key] ?? 0),
         }
       })
+      .filter((row): row is { managerId: string; planAmount: number } => row !== null)
 
-    await api.post('/analytics/manager-plans', {
-      period: selectedPeriod,
-      plans: payloadPlans,
-    })
-
-    const nextPlansByPeriod = {
-      ...plansByPeriod,
-      [selectedPeriod]: draftPlans,
+    if (payloadPlans.length === 0) {
+      alert(
+        'Не удалось определить id менеджеров для сохранения плана. Обновите страницу или войдите под руководителем/администратором.',
+      )
+      return
     }
-    setPlansByPeriod(nextPlansByPeriod)
-    setIsPlanModalOpen(false)
+
+    try {
+      await api.post('/analytics/manager-plans', {
+        period: selectedPeriod,
+        plans: payloadPlans,
+      })
+      await loadPlansForPeriod(selectedPeriod)
+      setIsPlanModalOpen(false)
+    } catch (error: unknown) {
+      console.error('Failed to save manager plans:', error)
+      const ax = error as { response?: { data?: { error?: string }; status?: number } }
+      const msg =
+        ax.response?.data?.error ||
+        (ax.response?.status === 403
+          ? 'Недостаточно прав: назначать план могут только руководитель и администратор'
+          : 'Не удалось сохранить план')
+      alert(msg)
+    }
   }
 
   const loadDashboardData = async () => {
@@ -179,8 +232,34 @@ export default function DashboardPage() {
       return acc
     }, {} as Record<string, (typeof managerRevenueFromApi)[number]>)
 
+    const registry = data?.salesManagers
+    if (registry && registry.length > 0) {
+      return registry.map((sm) => {
+        const rev = apiByManagerId[sm.managerId]
+        const assemblyRevenue = rev?.assemblyRevenue ?? 0
+        const packageRevenue = rev?.packageRevenue ?? 0
+        const salesRevenue = assemblyRevenue + packageRevenue
+        const plan = plansForPeriod[sm.managerId] ?? defaultPlanForManager(sm.name)
+        const percent = plan > 0 ? Number(((salesRevenue / plan) * 100).toFixed(2)) : 0
+        const shortName = sm.name.trim().split(/\s+/)[0] || sm.name
+        return {
+          managerId: sm.managerId,
+          name: sm.name,
+          shortName,
+          assemblyRevenue,
+          packageRevenue,
+          salesRevenue,
+          revenue: salesRevenue,
+          plan,
+          percent,
+        }
+      })
+    }
+
+    const apiManagersList = Object.values(apiByManagerId)
+
     const baseRows = MANAGERS.map((manager) => {
-      const apiManager = Object.values(apiByManagerId).find((item) => item.name === manager.name)
+      const apiManager = findMatchingApiManager(apiManagersList, manager.name)
       const assemblyRevenue = apiManager?.assemblyRevenue ?? manager.assemblyRevenue
       const packageRevenue = apiManager?.packageRevenue ?? manager.packageRevenue
       const salesRevenue = assemblyRevenue + packageRevenue
@@ -200,9 +279,9 @@ export default function DashboardPage() {
       }
     })
 
-    const knownNames = new Set(MANAGERS.map((manager) => manager.name))
+    const knownNameKeys = new Set(MANAGERS.map((manager) => normalizePersonNameKey(manager.name)))
     const extraRows = managerRevenueFromApi
-      .filter((manager) => !knownNames.has(manager.name))
+      .filter((manager) => !knownNameKeys.has(normalizePersonNameKey(manager.name)))
       .map((manager) => {
         const salesRevenue = manager.assemblyRevenue + manager.packageRevenue
         const plan = plansForPeriod[manager.managerId] ?? defaultPlanForManager(manager.name)
@@ -221,7 +300,7 @@ export default function DashboardPage() {
       })
 
     return [...baseRows, ...extraRows]
-  }, [data?.currentMonth.managerRevenue, plansForPeriod])
+  }, [data?.salesManagers, data?.currentMonth.managerRevenue, plansForPeriod])
 
   if (loading) {
     return (
@@ -288,7 +367,10 @@ export default function DashboardPage() {
             </div>
             <table className="w-full text-sm">
               {managerRows.map((manager) => (
-                <tr key={manager.name} className="border-b border-gray-100 even:bg-gray-50/40 hover:bg-primary-50/40 transition-colors">
+                <tr
+                  key={manager.managerId ?? manager.name}
+                  className="border-b border-gray-100 even:bg-gray-50/40 hover:bg-primary-50/40 transition-colors"
+                >
                   <td className="px-4 py-2 text-gray-700">{manager.shortName}</td>
                   <td className="px-4 py-2 text-right font-medium text-gray-900">{formatMoney(manager.salesRevenue)}</td>
                 </tr>
@@ -308,7 +390,10 @@ export default function DashboardPage() {
             </div>
             <table className="w-full text-sm">
               {managerRows.map((manager) => (
-                <tr key={manager.name} className="border-b border-gray-100 even:bg-gray-50/40 hover:bg-primary-50/40 transition-colors">
+                <tr
+                  key={manager.managerId ?? manager.name}
+                  className="border-b border-gray-100 even:bg-gray-50/40 hover:bg-primary-50/40 transition-colors"
+                >
                   <td className="px-4 py-2 text-gray-700">{manager.shortName}</td>
                   <td className="px-4 py-2 text-right font-medium text-gray-900">{formatMoney(manager.assemblyRevenue)}</td>
                 </tr>
@@ -328,7 +413,10 @@ export default function DashboardPage() {
             </div>
             <table className="w-full text-sm">
               {managerRows.map((manager) => (
-                <tr key={manager.name} className="border-b border-gray-100 even:bg-gray-50/40 hover:bg-primary-50/40 transition-colors">
+                <tr
+                  key={manager.managerId ?? manager.name}
+                  className="border-b border-gray-100 even:bg-gray-50/40 hover:bg-primary-50/40 transition-colors"
+                >
                   <td className="px-4 py-2 text-gray-700">{manager.shortName}</td>
                   <td className="px-4 py-2 text-right font-medium text-gray-900">{formatMoney(manager.packageRevenue)}</td>
                 </tr>
@@ -363,7 +451,10 @@ export default function DashboardPage() {
 
           <table className="w-full text-sm">
             {managerRows.map((manager) => (
-              <tr key={manager.name} className="border-b border-gray-100 even:bg-gray-50/40 hover:bg-primary-50/30 transition-colors">
+              <tr
+                key={manager.managerId ?? manager.name}
+                className="border-b border-gray-100 even:bg-gray-50/40 hover:bg-primary-50/30 transition-colors"
+              >
                 <td className="px-4 py-2 text-gray-700 w-[28%]">{manager.shortName}</td>
                 <td className="px-4 py-2 w-[30%] text-right text-gray-900 font-medium">{formatMoney(manager.plan)}</td>
                 <td className="px-4 py-2 text-right w-[42%]">
@@ -409,7 +500,7 @@ export default function DashboardPage() {
             </div>
             <div className="p-5 space-y-3 max-h-[65vh] overflow-y-auto">
               {managerRows.map((manager) => (
-                <div key={manager.name} className="grid grid-cols-2 items-center gap-3">
+                <div key={manager.managerId ?? manager.name} className="grid grid-cols-2 items-center gap-3">
                   <p className="text-sm text-gray-700">{manager.name}</p>
                   <input
                     type="number"

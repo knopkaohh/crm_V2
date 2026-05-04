@@ -492,6 +492,7 @@ export default function LeadDetailPage() {
                         <option value="">Не выбрано</option>
                         <option value="Avito">Avito</option>
                         <option value="Сайт">Сайт</option>
+                        <option value="Почта">Почта</option>
                         <option value="Холодные обзвоны">Холодные обзвоны</option>
                         <option value="Сарафанное радио">Сарафанное радио</option>
                         <option value="Рекомендация">Рекомендация</option>
