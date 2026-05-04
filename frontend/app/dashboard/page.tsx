@@ -232,29 +232,9 @@ export default function DashboardPage() {
       return acc
     }, {} as Record<string, (typeof managerRevenueFromApi)[number]>)
 
-    const registry = data?.salesManagers
-    if (registry && registry.length > 0) {
-      return registry.map((sm) => {
-        const rev = apiByManagerId[sm.managerId]
-        const assemblyRevenue = rev?.assemblyRevenue ?? 0
-        const packageRevenue = rev?.packageRevenue ?? 0
-        const salesRevenue = assemblyRevenue + packageRevenue
-        const plan = plansForPeriod[sm.managerId] ?? defaultPlanForManager(sm.name)
-        const percent = plan > 0 ? Number(((salesRevenue / plan) * 100).toFixed(2)) : 0
-        const shortName = sm.name.trim().split(/\s+/)[0] || sm.name
-        return {
-          managerId: sm.managerId,
-          name: sm.name,
-          shortName,
-          assemblyRevenue,
-          packageRevenue,
-          salesRevenue,
-          revenue: salesRevenue,
-          plan,
-          percent,
-        }
-      })
-    }
+    /** Реестр из API нужен для id при сохранении планов; строки таблицы всегда строим из MANAGERS + выручка,
+     * иначе при непустом salesManagers пропадали менеджеры, которых нет в этой выборке БД. */
+    const registry = data?.salesManagers ?? []
 
     const apiManagersList = Object.values(apiByManagerId)
 
@@ -299,7 +279,37 @@ export default function DashboardPage() {
         }
       })
 
-    return [...baseRows, ...extraRows]
+    const merged = [...baseRows, ...extraRows]
+    const coveredIds = new Set(merged.map((r) => r.managerId).filter(Boolean) as string[])
+    const coveredNameKeys = new Set(merged.map((r) => normalizePersonNameKey(r.name)))
+
+    for (const sm of registry) {
+      const nameKey = normalizePersonNameKey(sm.name)
+      if (sm.managerId && coveredIds.has(sm.managerId)) continue
+      if (coveredNameKeys.has(nameKey)) continue
+      coveredIds.add(sm.managerId)
+      coveredNameKeys.add(nameKey)
+      const rev = apiByManagerId[sm.managerId]
+      const assemblyRevenue = rev?.assemblyRevenue ?? 0
+      const packageRevenue = rev?.packageRevenue ?? 0
+      const salesRevenue = assemblyRevenue + packageRevenue
+      const plan = plansForPeriod[sm.managerId] ?? defaultPlanForManager(sm.name)
+      const percent = plan > 0 ? Number(((salesRevenue / plan) * 100).toFixed(2)) : 0
+      const shortName = sm.name.trim().split(/\s+/)[0] || sm.name
+      merged.push({
+        managerId: sm.managerId,
+        name: sm.name,
+        shortName,
+        assemblyRevenue,
+        packageRevenue,
+        salesRevenue,
+        revenue: salesRevenue,
+        plan,
+        percent,
+      })
+    }
+
+    return merged
   }, [data?.salesManagers, data?.currentMonth.managerRevenue, plansForPeriod])
 
   if (loading) {
