@@ -90,11 +90,23 @@ function normalizePersonNameKey(name: string): string {
     .join('|')
 }
 
+/** Все слова более короткого ФИО содержатся в более длинном (отчество в CRM: «Антон Юрьевич Федотов» vs «Антон Федотов»). */
+function personNamesMatch(canonicalName: string, apiName: string): boolean {
+  const a = canonicalName.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const b = apiName.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if (a.length === 0 || b.length === 0) return false
+  if (normalizePersonNameKey(canonicalName) === normalizePersonNameKey(apiName)) return true
+  const sa = new Set(a)
+  const sb = new Set(b)
+  if (a.length >= 2 && a.every((t) => sb.has(t))) return true
+  if (b.length >= 2 && b.every((t) => sa.has(t))) return true
+  return false
+}
+
 function findMatchingApiManager<
   T extends { managerId: string; name: string },
 >(apiManagers: T[], candidateDisplayName: string): T | undefined {
-  const key = normalizePersonNameKey(candidateDisplayName)
-  return apiManagers.find((m) => normalizePersonNameKey(m.name) === key)
+  return apiManagers.find((m) => personNamesMatch(candidateDisplayName, m.name))
 }
 
 export default function DashboardPage() {
@@ -137,7 +149,8 @@ export default function DashboardPage() {
     const initialDrafts: Record<string, number> = {}
     managerRows.forEach((manager) => {
       const key = getManagerPlanKey(manager)
-      initialDrafts[key] = plansForPeriod[key] ?? defaultPlanForManager(manager.name)
+      initialDrafts[key] =
+        plansForPeriod[key] ?? manager.plan ?? defaultPlanForManager(manager.name)
     })
     setDraftPlans(initialDrafts)
     setIsPlanModalOpen(true)
@@ -148,12 +161,10 @@ export default function DashboardPage() {
     name: string
   }): string | undefined => {
     if (manager.managerId) return manager.managerId
-    const fromRegistry = data?.salesManagers?.find(
-      (m) => normalizePersonNameKey(m.name) === normalizePersonNameKey(manager.name),
-    )
+    const fromRegistry = data?.salesManagers?.find((m) => personNamesMatch(manager.name, m.name))
     if (fromRegistry) return fromRegistry.managerId
-    const fromRevenue = data?.currentMonth?.managerRevenue?.find(
-      (m) => normalizePersonNameKey(m.name) === normalizePersonNameKey(manager.name),
+    const fromRevenue = data?.currentMonth?.managerRevenue?.find((m) =>
+      personNamesMatch(manager.name, m.name),
     )
     return fromRevenue?.managerId
   }
@@ -179,10 +190,19 @@ export default function DashboardPage() {
     }
 
     try {
-      await api.post('/analytics/manager-plans', {
+      const saveRes = await api.post('/analytics/manager-plans', {
         period: selectedPeriod,
         plans: payloadPlans,
       })
+      const saved = Array.isArray(saveRes.data?.plans) ? saveRes.data.plans : []
+      const mappedFromSave = saved.reduce(
+        (acc: Record<string, number>, item: { managerId: string; planAmount: number }) => {
+          acc[item.managerId] = Number(item.planAmount ?? 0)
+          return acc
+        },
+        {},
+      )
+      setPlansByPeriod((prev) => ({ ...prev, [selectedPeriod]: mappedFromSave }))
       await loadPlansForPeriod(selectedPeriod)
       setIsPlanModalOpen(false)
     } catch (error: unknown) {
@@ -240,9 +260,7 @@ export default function DashboardPage() {
 
     const baseRows = MANAGERS.map((manager) => {
       const apiManager = findMatchingApiManager(apiManagersList, manager.name)
-      const fromRegistry = registry.find(
-        (m) => normalizePersonNameKey(m.name) === normalizePersonNameKey(manager.name),
-      )
+      const fromRegistry = registry.find((m) => personNamesMatch(manager.name, m.name))
       /** Без id ключ плана — имя, а в БД планы по uuid → после сохранения цифры «не меняются». */
       const resolvedManagerId = apiManager?.managerId ?? fromRegistry?.managerId
 
@@ -265,9 +283,8 @@ export default function DashboardPage() {
       }
     })
 
-    const knownNameKeys = new Set(MANAGERS.map((manager) => normalizePersonNameKey(manager.name)))
     const extraRows = managerRevenueFromApi
-      .filter((manager) => !knownNameKeys.has(normalizePersonNameKey(manager.name)))
+      .filter((manager) => !MANAGERS.some((fixed) => personNamesMatch(fixed.name, manager.name)))
       .map((manager) => {
         const salesRevenue = manager.assemblyRevenue + manager.packageRevenue
         const plan = plansForPeriod[manager.managerId] ?? defaultPlanForManager(manager.name)
@@ -287,14 +304,11 @@ export default function DashboardPage() {
 
     const merged = [...baseRows, ...extraRows]
     const coveredIds = new Set(merged.map((r) => r.managerId).filter(Boolean) as string[])
-    const coveredNameKeys = new Set(merged.map((r) => normalizePersonNameKey(r.name)))
 
     for (const sm of registry) {
-      const nameKey = normalizePersonNameKey(sm.name)
       if (sm.managerId && coveredIds.has(sm.managerId)) continue
-      if (coveredNameKeys.has(nameKey)) continue
+      if (merged.some((r) => personNamesMatch(r.name, sm.name))) continue
       coveredIds.add(sm.managerId)
-      coveredNameKeys.add(nameKey)
       const rev = apiByManagerId[sm.managerId]
       const assemblyRevenue = rev?.assemblyRevenue ?? 0
       const packageRevenue = rev?.packageRevenue ?? 0
