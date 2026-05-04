@@ -1,10 +1,29 @@
 import express from 'express';
+import { UserRole } from '@prisma/client';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import XLSX from 'xlsx';
 import PDFDocument from 'pdfkit';
 
 const router = express.Router();
+
+/** Кто может быть в планах продаж и в блоке выручки (как в project-sales / заказы). */
+function salesFacingUserWhereClause(): {
+  isActive: boolean;
+  OR: Array<
+    | { role: { in: UserRole[] } }
+    | { secondaryRoles: { has: UserRole } }
+  >;
+} {
+  return {
+    isActive: true,
+    OR: [
+      { role: { in: [UserRole.SALES_MANAGER, UserRole.CLIENT_MANAGER] } },
+      { secondaryRoles: { has: UserRole.SALES_MANAGER } },
+      { secondaryRoles: { has: UserRole.CLIENT_MANAGER } },
+    ],
+  };
+}
 const PERIOD_REGEX = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 const getValidatedPeriod = (raw: unknown) => {
@@ -153,9 +172,10 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
         },
       }),
       prisma.user.findMany({
-        where: userRole === 'SALES_MANAGER'
-          ? { id: userId, role: 'SALES_MANAGER', isActive: true }
-          : { role: 'SALES_MANAGER', isActive: true },
+        where:
+          userRole === 'SALES_MANAGER'
+            ? { id: userId, isActive: true }
+            : salesFacingUserWhereClause(),
         select: {
           id: true,
           firstName: true,
@@ -358,8 +378,7 @@ router.post('/manager-plans', authenticate, requireRole('EXECUTIVE', 'ADMIN'), a
       const validManagers = await prisma.user.findMany({
         where: {
           id: { in: managerIds },
-          role: 'SALES_MANAGER',
-          isActive: true,
+          AND: [salesFacingUserWhereClause()],
         },
         select: { id: true },
       });
@@ -368,7 +387,8 @@ router.post('/manager-plans', authenticate, requireRole('EXECUTIVE', 'ADMIN'), a
       if (unknown.length > 0) {
         console.warn('POST /manager-plans: invalid manager ids', unknown);
         return res.status(400).json({
-          error: 'В плане указаны неизвестные или неактивные менеджеры продаж',
+          error:
+            'В плане указаны пользователи, которые не являются активными менеджерами продаж/клиентскими менеджерами',
         });
       }
     }
