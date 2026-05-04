@@ -375,21 +375,15 @@ router.post('/manager-plans', authenticate, requireRole('EXECUTIVE', 'ADMIN'), a
 
     const managerIds = normalizedPlans.map((p) => p.managerId);
     if (managerIds.length > 0) {
-      const validManagers = await prisma.user.findMany({
-        where: {
-          id: { in: managerIds },
-          AND: [salesFacingUserWhereClause()],
-        },
+      const existing = await prisma.user.findMany({
+        where: { id: { in: managerIds } },
         select: { id: true },
       });
-      const allowed = new Set(validManagers.map((u) => u.id));
+      const allowed = new Set(existing.map((u) => u.id));
       const unknown = managerIds.filter((id) => !allowed.has(id));
       if (unknown.length > 0) {
-        console.warn('POST /manager-plans: invalid manager ids', unknown);
-        return res.status(400).json({
-          error:
-            'В плане указаны пользователи, которые не являются активными менеджерами продаж/клиентскими менеджерами',
-        });
+        console.warn('POST /manager-plans: unknown user ids', unknown);
+        return res.status(400).json({ error: 'В плане указаны несуществующие пользователи (id)' });
       }
     }
 
