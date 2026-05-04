@@ -240,16 +240,22 @@ export default function DashboardPage() {
 
     const baseRows = MANAGERS.map((manager) => {
       const apiManager = findMatchingApiManager(apiManagersList, manager.name)
+      const fromRegistry = registry.find(
+        (m) => normalizePersonNameKey(m.name) === normalizePersonNameKey(manager.name),
+      )
+      /** Без id ключ плана — имя, а в БД планы по uuid → после сохранения цифры «не меняются». */
+      const resolvedManagerId = apiManager?.managerId ?? fromRegistry?.managerId
+
       const assemblyRevenue = apiManager?.assemblyRevenue ?? manager.assemblyRevenue
       const packageRevenue = apiManager?.packageRevenue ?? manager.packageRevenue
       const salesRevenue = assemblyRevenue + packageRevenue
       const revenue = salesRevenue
-      const key = getManagerPlanKey({ managerId: apiManager?.managerId, name: manager.name })
+      const key = getManagerPlanKey({ managerId: resolvedManagerId, name: manager.name })
       const plan = plansForPeriod[key] ?? defaultPlanForManager(manager.name)
       const percent = plan > 0 ? Number(((revenue / plan) * 100).toFixed(2)) : 0
       return {
         ...manager,
-        managerId: apiManager?.managerId,
+        managerId: resolvedManagerId,
         assemblyRevenue,
         packageRevenue,
         salesRevenue,
