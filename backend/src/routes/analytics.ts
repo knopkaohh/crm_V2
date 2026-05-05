@@ -60,6 +60,7 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
       totalRevenue,
       currentMonthOrders,
       currentMonthOrderStats,
+      currentDayOrderStats,
       currentMonthProducedUnits,
       currentMonthLeads,
       currentMonthOrdersWithItems,
@@ -114,6 +115,18 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
           totalAmount: true,
         },
         _avg: {
+          totalAmount: true,
+        },
+      }),
+      prisma.order.aggregate({
+        where: {
+          ...whereManager,
+          createdAt: {
+            gte: today,
+            lt: tomorrow,
+          },
+        },
+        _sum: {
           totalAmount: true,
         },
       }),
@@ -298,6 +311,7 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
       currentMonth: {
         ordersTotal: currentMonthOrders,
         revenueTotal: Number(currentMonthOrderStats._sum.totalAmount || 0),
+        todayRevenue: Number(currentDayOrderStats._sum.totalAmount || 0),
         averageCheck: Number(currentMonthOrderStats._avg.totalAmount || 0),
         producedUnitsTotal: Number(currentMonthProducedUnits._sum.quantity || 0),
         leadsTotal: currentMonthLeads.length,

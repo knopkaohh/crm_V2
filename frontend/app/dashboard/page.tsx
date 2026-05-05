@@ -30,6 +30,7 @@ interface DashboardData {
   currentMonth: {
     ordersTotal: number
     revenueTotal: number
+    todayRevenue: number
     averageCheck: number
     producedUnitsTotal: number
     leadsTotal: number
@@ -229,6 +230,7 @@ export default function DashboardPage() {
   }
 
   const monthlyRevenue = useMemo(() => data?.currentMonth.revenueTotal ?? 0, [data?.currentMonth.revenueTotal])
+  const todayRevenue = useMemo(() => data?.currentMonth.todayRevenue ?? 0, [data?.currentMonth.todayRevenue])
 
   const plansForPeriod = plansByPeriod[selectedPeriod] ?? {}
 
@@ -379,13 +381,18 @@ export default function DashboardPage() {
               />
             </label>
           </div>
-          <div className="mt-6 inline-flex items-center gap-3 rounded-xl border border-primary-100 bg-white px-4 py-3 shadow-sm">
+          <div className="mt-6 flex flex-col sm:flex-row sm:items-center gap-4 rounded-xl border border-primary-100 bg-white px-4 py-3 shadow-sm">
             <div className="h-11 w-11 rounded-xl bg-primary-100 flex items-center justify-center">
               <span className="text-primary-700 text-xl font-bold leading-none">₽</span>
             </div>
             <div>
               <p className="text-sm text-gray-600">Общая выручка за текущий месяц</p>
               <p className="text-3xl font-bold text-gray-900">{formatMoney(monthlyRevenue)}</p>
+            </div>
+            <div className="hidden sm:block h-12 w-px bg-gray-200" />
+            <div>
+              <p className="text-sm text-gray-600">Выручка за сегодня</p>
+              <p className="text-2xl font-bold text-gray-900">{formatMoney(todayRevenue)}</p>
             </div>
           </div>
         </div>
