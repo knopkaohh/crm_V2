@@ -661,6 +661,9 @@ export default function NewOrderPage() {
                           <option value="Жаккард">Жаккард</option>
                           <option value="Картонная навесная бирка">Картонная навесная бирка</option>
                           <option value="Хлопок">Хлопок</option>
+                          <option value="Нейлон">Нейлон</option>
+                          <option value="ДТФ наклейки">ДТФ наклейки</option>
+                          <option value="Флекстран">Флекстран</option>
                           <option value="ZIP-Lock пакет">ZIP-Lock пакет</option>
                           <option value="Разработка макетов">Разработка макетов</option>
                         </select>

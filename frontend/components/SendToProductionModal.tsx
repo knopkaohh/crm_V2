@@ -80,6 +80,9 @@ function extractMaterial(itemName: string): string {
     'Сатин премиум',
     'Силикон',
     'Хлопок',
+    'Нейлон',
+    'ДТФ наклейки',
+    'Флекстран',
     'Жаккард',
     'Картонная навесная бирка',
     'ZIP-Lock пакет'
@@ -240,7 +243,18 @@ export default function SendToProductionModal({
         }
         
         // Поля в зависимости от материала
-        if (['Сатин классический', 'Сатин премиум', 'Силикон', 'Хлопок', 'Жаккард'].includes(material)) {
+        if (
+          [
+            'Сатин классический',
+            'Сатин премиум',
+            'Силикон',
+            'Хлопок',
+            'Нейлон',
+            'ДТФ наклейки',
+            'Флекстран',
+            'Жаккард',
+          ].includes(material)
+        ) {
           updateData.baseColor = params.baseColor || null
           updateData.baseColorCustom = params.baseColor === 'Цветной' ? (params.baseColorCustom || null) : null
           updateData.printColor = params.printColor || null
@@ -252,7 +266,7 @@ export default function SendToProductionModal({
             updateData.centerFold = params.centerFold ? 'Да' : 'Нет'
             updateData.freeEdge = params.freeEdge ? 'Да' : 'Нет'
           } else {
-            // Для Сатина, Силикона, Хлопка: резка есть, подгибки нет
+            // Для Сатина, Силикона, Хлопка, Нейлона, ДТФ наклеек, Флекстрана: резка есть, подгибки нет
             updateData.cutting = params.cutting ? 'Да' : 'Нет'
             updateData.centerFold = null
             updateData.freeEdge = null
@@ -492,7 +506,15 @@ export default function SendToProductionModal({
 
                 const material = extractMaterial(item.name || '')
                 const params = itemParams[itemId] || {}
-                const isSatinSiliconCotton = ['Сатин классический', 'Сатин премиум', 'Силикон', 'Хлопок'].includes(material)
+                const isSatinSiliconCotton = [
+                  'Сатин классический',
+                  'Сатин премиум',
+                  'Силикон',
+                  'Хлопок',
+                  'Нейлон',
+                  'ДТФ наклейки',
+                  'Флекстран',
+                ].includes(material)
                 const isJacquard = material === 'Жаккард'
                 const isCardboard = material === 'Картон'
                 const isZipLock = material === 'ZIP-Lock пакет'
