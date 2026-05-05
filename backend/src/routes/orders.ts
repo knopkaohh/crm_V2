@@ -10,11 +10,8 @@ import { canAccessLeadByManager } from '../utils/leads-access';
 
 const router = express.Router();
 
-/** Только свой заказ для менеджера продаж; остальные роли — по текущей политике заказов */
-function canMutateOrder(req: AuthRequest, managerId: string): boolean {
-  if (req.userRole === 'SALES_MANAGER') {
-    return Boolean(req.userId && req.userId === managerId);
-  }
+/** По текущей бизнес-логике раздел "Заказы" открыт для всех ролей без ограничений по owner. */
+function canMutateOrder(_req: AuthRequest, _managerId: string): boolean {
   return true;
 }
 
@@ -41,32 +38,9 @@ router.get('/', authenticate, async (req, res) => {
 
     const where: any = {};
 
-    // Менеджеры видят только свои заказы, технолог - все в производстве, исполнитель - все
-    const authReq = req as AuthRequest;
-    if (authReq.userRole === 'SALES_MANAGER') {
-      where.managerId = authReq.userId;
-    } else if (authReq.userRole === 'TECHNOLOGIST') {
-      // Технолог видит только заказы в производстве
-      where.status = {
-        in: ['NEW_ORDER', 'DESIGN_APPROVAL', 'AWAITING_MATERIALS', 'IN_PRODUCTION'],
-      };
-    }
-    // EXECUTIVE и ADMIN видят все заказы без ограничений
-
-    // Применяем фильтры из query параметров (они могут переопределить фильтры по ролям)
+    // Применяем фильтры из query параметров.
     if (status) {
-      // Если есть фильтр по статусу, применяем его
-      // Для технолога это может сузить выборку, для остальных - просто фильтр
-      if (authReq.userRole === 'TECHNOLOGIST') {
-        // Для технолога проверяем, что запрашиваемый статус входит в разрешенные
-        const allowedStatuses = ['NEW_ORDER', 'DESIGN_APPROVAL', 'AWAITING_MATERIALS', 'IN_PRODUCTION'];
-        if (allowedStatuses.includes(status as string)) {
-          where.status = status;
-        }
-        // Если статус не разрешен, игнорируем его (оставляем фильтр по роли)
-      } else {
-        where.status = status;
-      }
+      where.status = status;
     }
 
     if (managerId) {
@@ -247,13 +221,6 @@ router.get('/:id/invoice', authenticate, async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Заказ не найден' });
     }
 
-    if (
-      req.userRole === 'SALES_MANAGER' &&
-      order.managerId !== req.userId
-    ) {
-      return res.status(403).json({ error: 'Недостаточно прав доступа' });
-    }
-
     const rawTimeout = parseInt(process.env.INVOICE_GENERATION_TIMEOUT_MS || '90000', 10);
     const timeoutMs = Math.min(Math.max(Number.isFinite(rawTimeout) ? rawTimeout : 90000, 5000), 300000);
 
@@ -430,14 +397,6 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
 
     if (!order) {
       return res.status(404).json({ error: 'Заказ не найден' });
-    }
-
-    // Проверка прав доступа
-    if (
-      req.userRole === 'SALES_MANAGER' &&
-      order.managerId !== req.userId
-    ) {
-      return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 
     res.json(order);
@@ -697,14 +656,6 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
 
     if (!existingOrder) {
       return res.status(404).json({ error: 'Заказ не найден' });
-    }
-
-    // Проверка прав доступа
-    if (
-      req.userRole === 'SALES_MANAGER' &&
-      existingOrder.managerId !== req.userId
-    ) {
-      return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 
     const updateData: any = {};
@@ -1116,10 +1067,6 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
 
     if (!existingOrder) {
       return res.status(404).json({ error: 'Заказ не найден' });
-    }
-
-    if (req.userRole === 'SALES_MANAGER' && existingOrder.managerId !== req.userId) {
-      return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 
     await prisma.order.delete({

@@ -34,12 +34,9 @@ const getValidatedPeriod = (raw: unknown) => {
 // Получить метрики для дашборда
 router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
   try {
-    const userId = req.userId!;
-    const userRole = req.userRole!;
-
-    const whereManager = userRole === 'SALES_MANAGER' ? { managerId: userId } : {};
-    const whereCreator = userRole === 'SALES_MANAGER' ? { creatorId: userId } : {};
-    const whereAssignee = userRole === 'SALES_MANAGER' ? { assigneeId: userId } : {};
+    const whereManager = {};
+    const whereCreator = {};
+    const whereAssignee = {};
     const now = new Date();
     const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
@@ -172,10 +169,7 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
         },
       }),
       prisma.user.findMany({
-        where:
-          userRole === 'SALES_MANAGER'
-            ? { id: userId, isActive: true }
-            : salesFacingUserWhereClause(),
+        where: salesFacingUserWhereClause(),
         select: {
           id: true,
           firstName: true,

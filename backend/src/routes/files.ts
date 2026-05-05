@@ -216,13 +216,9 @@ router.get('/:id/download', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 
-    const authReq = req as AuthRequest;
     if (file.orderId) {
       if (!file.order) {
         return res.status(404).json({ error: 'Файл не найден' });
-      }
-      if (authReq.userRole === 'SALES_MANAGER' && file.order.managerId !== authReq.userId) {
-        return res.status(403).json({ error: 'Недостаточно прав доступа' });
       }
     }
 
@@ -254,8 +250,9 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Файл не найден' });
     }
 
-    // Проверка прав доступа (только загрузивший или админ)
-    if (file.uploadedBy !== req.userId && req.userRole !== 'ADMIN') {
+    // Для файлов заказов — полный доступ всем ролям.
+    // Для остальных файлов действует правило "загрузивший или админ".
+    if (!file.orderId && file.uploadedBy !== req.userId && req.userRole !== 'ADMIN') {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 

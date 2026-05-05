@@ -1,21 +1,11 @@
 import { AuthRequest } from '../middleware/auth';
 
-const FULL_ACCESS_ROLES = new Set(['ADMIN', 'EXECUTIVE']);
+const FULL_ACCESS_ROLES = new Set(['EXECUTIVE']);
 
-function fullAccessEmails(): string[] {
-  return (process.env.LEADS_FULL_ACCESS_EMAILS || 'antonfedtube@gmail.com')
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-/** Все контакты: руководитель отдела продаж (EXECUTIVE), админ, либо email из LEADS_FULL_ACCESS_EMAILS (по умолчанию Антон Федотов). */
+/** Все контакты: только руководитель отдела продаж (EXECUTIVE). */
 export function canViewAllLeads(req: AuthRequest): boolean {
   if (!req.userId || !req.userRole) return false;
-  if (FULL_ACCESS_ROLES.has(req.userRole)) return true;
-  const email = req.userEmail?.toLowerCase();
-  if (email && fullAccessEmails().includes(email)) return true;
-  return false;
+  return FULL_ACCESS_ROLES.has(req.userRole);
 }
 
 /** Полное удаление лида без архива — только те же роли/пользователи, что и «все контакты». */

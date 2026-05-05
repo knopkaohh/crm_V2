@@ -182,9 +182,7 @@ export default function Layout({ children }: LayoutProps) {
     { href: '/calls', label: 'Теплые обзвоны', icon: Phone },
   ]
 
-  if (user.role === 'EXECUTIVE' || user.role === 'ADMIN') {
-    menuItems.push({ href: '/analytics', label: 'Аналитика', icon: BarChart3 })
-  }
+  menuItems.push({ href: '/analytics', label: 'Аналитика', icon: BarChart3 })
 
   if (user.role === 'ADMIN') {
     menuItems.push({ href: '/admin', label: 'Админ-панель', icon: Settings })
