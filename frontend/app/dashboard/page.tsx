@@ -31,6 +31,7 @@ interface DashboardData {
     ordersTotal: number
     revenueTotal: number
     todayRevenue: number
+    todayOrdersCount: number
     averageCheck: number
     producedUnitsTotal: number
     leadsTotal: number
@@ -231,6 +232,10 @@ export default function DashboardPage() {
 
   const monthlyRevenue = useMemo(() => data?.currentMonth.revenueTotal ?? 0, [data?.currentMonth.revenueTotal])
   const todayRevenue = useMemo(() => data?.currentMonth.todayRevenue ?? 0, [data?.currentMonth.todayRevenue])
+  const todayOrdersCount = useMemo(
+    () => data?.currentMonth.todayOrdersCount ?? 0,
+    [data?.currentMonth.todayOrdersCount],
+  )
 
   const plansForPeriod = plansByPeriod[selectedPeriod] ?? {}
 
@@ -381,18 +386,21 @@ export default function DashboardPage() {
               />
             </label>
           </div>
-          <div className="mt-6 flex flex-col sm:flex-row sm:items-center gap-4 rounded-xl border border-primary-100 bg-white px-4 py-3 shadow-sm">
-            <div className="h-11 w-11 rounded-xl bg-primary-100 flex items-center justify-center">
-              <span className="text-primary-700 text-xl font-bold leading-none">₽</span>
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="rounded-xl border border-primary-200 bg-white px-4 py-3 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Текущий месяц</p>
+              <p className="mt-1 text-sm text-gray-600">Общая выручка</p>
+              <p className="mt-2 text-2xl font-bold text-gray-900">{formatMoney(monthlyRevenue)}</p>
             </div>
-            <div>
-              <p className="text-sm text-gray-600">Общая выручка за текущий месяц</p>
-              <p className="text-3xl font-bold text-gray-900">{formatMoney(monthlyRevenue)}</p>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-3 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Сегодня</p>
+              <p className="mt-1 text-sm text-gray-600">Выручка за день</p>
+              <p className="mt-2 text-2xl font-bold text-gray-900">{formatMoney(todayRevenue)}</p>
             </div>
-            <div className="hidden sm:block h-12 w-px bg-gray-200" />
-            <div>
-              <p className="text-sm text-gray-600">Выручка за сегодня</p>
-              <p className="text-2xl font-bold text-gray-900">{formatMoney(todayRevenue)}</p>
+            <div className="rounded-xl border border-blue-200 bg-blue-50/50 px-4 py-3 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Сегодня</p>
+              <p className="mt-1 text-sm text-gray-600">Количество заказов</p>
+              <p className="mt-2 text-2xl font-bold text-gray-900">{todayOrdersCount}</p>
             </div>
           </div>
         </div>
