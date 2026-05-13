@@ -56,8 +56,13 @@ enum ProjectSaleStage {
   NEW_BRANDS      // Новые бренды
   IN_PROGRESS     // Бренды в работе
   INTERESTED      // Заинтересованные
-  NOT_OUR_CLIENT  // Не наши клиенты
-  ORDER_PLACED    // Оформили заказ
+  NOT_OUR_CLIENT  // Не наш клиент
+  ORDER_PLACED    // Оформили заказ / образец
+}
+
+enum ProjectSaleOrderKind {
+  SAMPLES // Образцы
+  ORDER   // Заказ
 }
 
 // Пользователи системы
@@ -130,6 +135,8 @@ model Client {
   chats         Chat[]
   closedContacts ClosedContact[] @relation("ClientClosedContacts")
   projectSales   ProjectSale[]
+  directComments Comment[]         @relation("CommentOnClient")
+  clientFiles    File[]            @relation("FileOnClient")
 
   @@index([name])
   @@index([phone])
@@ -142,17 +149,21 @@ model Client {
 
 // Карточки воронки «Проектные продажи» (бренд + ответственный)
 model ProjectSale {
-  id          String           @id @default(uuid())
-  clientId    String
-  managerId   String
-  stage       ProjectSaleStage @default(NEW_BRANDS)
-  createdById String?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id               String                @id @default(uuid())
+  clientId         String
+  managerId        String
+  stage            ProjectSaleStage      @default(NEW_BRANDS)
+  createdById      String?
+  rejectionReason  String?               @db.Text
+  orderBrief       String?               @db.Text
+  orderKind        ProjectSaleOrderKind?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
 
   client    Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
   manager   User   @relation("ProjectSaleManager", fields: [managerId], references: [id])
   createdBy User?  @relation("ProjectSaleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  files     File[]
 
   @@index([managerId])
   @@index([stage])
@@ -411,7 +422,7 @@ model MonthlyManagerPlan {
   @@map("monthly_manager_plans")
 }
 
-// Комментарии (для лидов, заказов и задач)
+// Комментарии (лиды, заказы, задачи, карточка клиента)
 model Comment {
   id          String   @id @default(uuid())
   content     String
@@ -419,6 +430,7 @@ model Comment {
   leadId      String?
   orderId     String?
   taskId      String?
+  clientId    String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -427,10 +439,12 @@ model Comment {
   lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
   order       Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   task        Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  client      Client?  @relation("CommentOnClient", fields: [clientId], references: [id], onDelete: Cascade)
 
   @@index([leadId])
   @@index([orderId])
   @@index([taskId])
+  @@index([clientId])
   @@map("comments")
 }
 
@@ -444,15 +458,21 @@ model File {
   path        String   // Путь к файлу
   leadId      String?
   orderId     String?
+  projectSaleId String?
+  clientId    String?
   uploadedBy  String   // User ID
   createdAt   DateTime @default(now())
 
   // Отношения
-  lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  order       Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  lead        Lead?        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  order       Order?       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  projectSale ProjectSale? @relation(fields: [projectSaleId], references: [id], onDelete: Cascade)
+  client      Client?      @relation("FileOnClient", fields: [clientId], references: [id], onDelete: Cascade)
 
   @@index([leadId])
   @@index([orderId])
+  @@index([projectSaleId])
+  @@index([clientId])
   @@map("files")
 }
 

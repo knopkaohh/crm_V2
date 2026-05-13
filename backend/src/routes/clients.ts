@@ -385,6 +385,56 @@ router.get('/:id', authenticate, async (req, res) => {
           },
           orderBy: { createdAt: 'desc' },
         },
+        directComments: {
+          select: {
+            id: true,
+            content: true,
+            createdAt: true,
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        clientFiles: {
+          select: {
+            id: true,
+            filename: true,
+            originalName: true,
+            mimeType: true,
+            size: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        projectSales: {
+          select: {
+            id: true,
+            stage: true,
+            manager: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+            files: {
+              select: {
+                id: true,
+                filename: true,
+                originalName: true,
+                mimeType: true,
+                size: true,
+                createdAt: true,
+              },
+              orderBy: { createdAt: 'desc' },
+            },
+          },
+        },
       },
     });
 
@@ -412,6 +462,13 @@ router.post('/:id/comments', authenticate, async (req: AuthRequest, res) => {
     // Если указан orderId или leadId, добавляем комментарий к заказу/лиду
     // Иначе создаем общий комментарий (можно расширить модель Client для комментариев)
     if (orderId) {
+      const order = await prisma.order.findFirst({
+        where: { id: orderId as string, clientId: id },
+        select: { id: true },
+      });
+      if (!order) {
+        return res.status(404).json({ error: 'Заказ не найден у этого клиента' });
+      }
       const comment = await prisma.comment.create({
         data: {
           content,
@@ -457,9 +514,33 @@ router.post('/:id/comments', authenticate, async (req: AuthRequest, res) => {
         },
       });
       return res.status(201).json(comment);
-    } else {
-      return res.status(400).json({ error: 'Необходимо указать orderId или leadId' });
     }
+
+    const clientRow = await prisma.client.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!clientRow) {
+      return res.status(404).json({ error: 'Клиент не найден' });
+    }
+
+    const comment = await prisma.comment.create({
+      data: {
+        content,
+        userId: req.userId!,
+        clientId: id,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+    return res.status(201).json(comment);
   } catch (error) {
     console.error('Create client comment error:', error);
     res.status(500).json({ error: 'Ошибка при создании комментария' });

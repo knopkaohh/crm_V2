@@ -72,6 +72,14 @@ interface Client {
   createdBy?: UserRef | null
   orders: Order[]
   leads: Lead[]
+  directComments?: Comment[]
+  clientFiles?: FileItem[]
+  projectSales?: {
+    id: string
+    stage: string
+    manager: UserRef
+    files: FileItem[]
+  }[]
 }
 
 interface ManagerOption {
@@ -144,15 +152,11 @@ export default function ClientDetailPage() {
 
   const loadManagers = async () => {
     try {
-      const response = await api.get('/leads', { params: { limit: 200 } })
-      const leadsData = response.data?.data || []
-      const managerMap = new Map<string, ManagerOption>()
-      leadsData.forEach((leadItem: any) => {
-        if (leadItem?.manager?.id) {
-          managerMap.set(leadItem.manager.id, leadItem.manager)
-        }
+      const response = await api.get('/project-sales/managers', {
+        headers: { 'X-Skip-Cache': '1' },
       })
-      setManagers(Array.from(managerMap.values()))
+      const list = (response.data ?? []) as ManagerOption[]
+      setManagers(list)
     } catch (error) {
       console.error('Failed to load managers:', error)
       setManagers([])
@@ -162,21 +166,17 @@ export default function ClientDetailPage() {
   const handleAddComment = async () => {
     if (!newComment.trim() || !client) return
 
-    // Автоматически выбираем первый заказ или первый лид
     const orderId = client.orders.length > 0 ? client.orders[0].id : null
     const leadId = !orderId && client.leads.length > 0 ? client.leads[0].id : null
 
-    if (!orderId && !leadId) {
-      alert('Нет заказов или лидов для добавления комментария')
-      return
+    const payload: { content: string; orderId?: string; leadId?: string } = {
+      content: newComment.trim(),
     }
+    if (orderId) payload.orderId = orderId
+    else if (leadId) payload.leadId = leadId
 
     try {
-      await api.post(`/clients/${clientId}/comments`, {
-        content: newComment,
-        orderId: orderId,
-        leadId: leadId,
-      })
+      await api.post(`/clients/${clientId}/comments`, payload)
       setNewComment('')
       loadClient()
     } catch (e) {
@@ -193,18 +193,13 @@ export default function ClientDetailPage() {
     const orderId = client.orders.length > 0 ? client.orders[0].id : null
     const leadId = !orderId && client.leads.length > 0 ? client.leads[0].id : null
 
-    if (!orderId && !leadId) {
-      alert('Нет заказов или лидов для загрузки файла')
-      e.target.value = ''
-      return
-    }
-
     setUploadingFile(true)
     try {
       const formData = new FormData()
       formData.append('file', file)
       if (orderId) formData.append('orderId', orderId)
-      if (leadId) formData.append('leadId', leadId)
+      else if (leadId) formData.append('leadId', leadId)
+      else formData.append('clientId', client.id)
 
       await api.post('/files/upload', formData, {
         headers: {
@@ -370,9 +365,13 @@ export default function ClientDetailPage() {
     user ? `${user.firstName} ${user.lastName}`.trim() : null
 
   const responsibleManager =
-    client.createdBy ?? client.leads[0]?.manager ?? client.orders[0]?.manager ?? null
+    client.createdBy ??
+    client.leads[0]?.manager ??
+    client.orders[0]?.manager ??
+    client.projectSales?.[0]?.manager ??
+    null
 
-  // Собираем всю историю из заказов и лидов
+  // Собираем всю историю из заказов, лидов и карточки клиента
   const allComments: (Comment & { source: string; sourceId: string })[] = []
   client.orders.forEach((order) => {
     order.comments.forEach((comment) => {
@@ -390,6 +389,13 @@ export default function ClientDetailPage() {
         source: `Лид #${lead.id.slice(0, 8)}`,
         sourceId: lead.id,
       })
+    })
+  })
+  ;(client.directComments ?? []).forEach((comment) => {
+    allComments.push({
+      ...comment,
+      source: 'Клиент',
+      sourceId: client.id,
     })
   })
   allComments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -447,8 +453,12 @@ export default function ClientDetailPage() {
       : []),
   ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 
-  // Собираем все файлы из заказов и лидов
-  const allFiles: (FileItem & { source: string; sourceId: string; sourceType: 'order' | 'lead' })[] = []
+  // Собираем все файлы из заказов, лидов, карточки клиента и проектных продаж
+  const allFiles: (FileItem & {
+    source: string
+    sourceId: string
+    sourceType: 'order' | 'lead' | 'client' | 'projectSale'
+  })[] = []
   client.orders.forEach((order) => {
     order.files.forEach((file) => {
       allFiles.push({
@@ -466,6 +476,24 @@ export default function ClientDetailPage() {
         source: `Лид #${lead.id.slice(0, 8)}`,
         sourceId: lead.id,
         sourceType: 'lead',
+      })
+    })
+  })
+  ;(client.clientFiles ?? []).forEach((file) => {
+    allFiles.push({
+      ...file,
+      source: 'Карточка клиента',
+      sourceId: client.id,
+      sourceType: 'client',
+    })
+  })
+  ;(client.projectSales ?? []).forEach((ps) => {
+    ps.files.forEach((file) => {
+      allFiles.push({
+        ...file,
+        source: 'Проектные продажи',
+        sourceId: ps.id,
+        sourceType: 'projectSale',
       })
     })
   })
@@ -718,7 +746,7 @@ export default function ClientDetailPage() {
                                 ? 'Лид'
                                 : event.kind === 'note'
                                   ? 'Карточка клиента'
-                                  : 'Заметка'}
+                                  : 'Комментарий'}
                           </p>
                         </div>
                         <span className="text-xs text-gray-500">

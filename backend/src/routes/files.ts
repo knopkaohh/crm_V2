@@ -78,9 +78,34 @@ function formatBytes(bytes: number): string {
 // Получить файлы
 router.get('/', authenticate, async (req: AuthRequest, res) => {
   try {
-    const { leadId, orderId } = req.query;
+    const { leadId, orderId, projectSaleId, clientId } = req.query;
 
     const where: any = {};
+
+    if (clientId) {
+      const client = await prisma.client.findUnique({
+        where: { id: clientId as string },
+        select: { id: true },
+      });
+      if (!client) {
+        return res.json([]);
+      }
+      where.clientId = clientId as string;
+    }
+
+    if (projectSaleId) {
+      const sale = await prisma.projectSale.findUnique({
+        where: { id: projectSaleId as string },
+        select: { managerId: true },
+      });
+      if (!sale) {
+        return res.json([]);
+      }
+      if (req.userRole !== 'ADMIN' && sale.managerId !== req.userId) {
+        return res.status(403).json({ error: 'Недостаточно прав доступа' });
+      }
+      where.projectSaleId = projectSaleId as string;
+    }
 
     if (leadId) {
       const lead = await prisma.lead.findUnique({
@@ -131,16 +156,54 @@ router.post('/upload', authenticate, (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Файл не загружен' });
     }
 
-    const { leadId, orderId } = req.body;
+    const { leadId, orderId, projectSaleId, clientId } = req.body;
 
-    if (!leadId && !orderId) {
-      // Удаляем загруженный файл, если нет связи
+    const linkCount = [leadId, orderId, projectSaleId, clientId].filter(Boolean).length;
+    if (linkCount !== 1) {
       try {
         await fsPromises.unlink(req.file.path);
       } catch (error) {
         console.warn('Failed to delete uploaded file:', error);
       }
-      return res.status(400).json({ error: 'Необходимо указать leadId или orderId' });
+      return res.status(400).json({ error: 'Укажите ровно одно из: leadId, orderId, projectSaleId, clientId' });
+    }
+
+    if (clientId) {
+      const client = await prisma.client.findUnique({
+        where: { id: clientId as string },
+        select: { id: true },
+      });
+      if (!client) {
+        try {
+          await fsPromises.unlink(req.file.path);
+        } catch {
+          /* noop */
+        }
+        return res.status(404).json({ error: 'Клиент не найден' });
+      }
+    }
+
+    if (projectSaleId) {
+      const sale = await prisma.projectSale.findUnique({
+        where: { id: projectSaleId as string },
+        select: { managerId: true },
+      });
+      if (!sale) {
+        try {
+          await fsPromises.unlink(req.file.path);
+        } catch {
+          /* noop */
+        }
+        return res.status(404).json({ error: 'Карточка проектных продаж не найдена' });
+      }
+      if (req.userRole !== 'ADMIN' && sale.managerId !== req.userId) {
+        try {
+          await fsPromises.unlink(req.file.path);
+        } catch {
+          /* noop */
+        }
+        return res.status(403).json({ error: 'Недостаточно прав доступа' });
+      }
     }
 
     if (leadId) {
@@ -175,6 +238,8 @@ router.post('/upload', authenticate, (req: AuthRequest, res) => {
         path: req.file.path,
         leadId: leadId || null,
         orderId: orderId || null,
+        projectSaleId: projectSaleId || null,
+        clientId: clientId || null,
         uploadedBy: req.userId!,
       },
     });
@@ -196,7 +261,7 @@ router.post('/upload', authenticate, (req: AuthRequest, res) => {
 });
 
 // Скачать файл
-router.get('/:id/download', authenticate, async (req, res) => {
+router.get('/:id/download', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
 
@@ -205,6 +270,8 @@ router.get('/:id/download', authenticate, async (req, res) => {
       include: {
         lead: { select: { managerId: true } },
         order: { select: { managerId: true } },
+        projectSale: { select: { managerId: true } },
+        client: { select: { id: true } },
       },
     });
 
@@ -214,6 +281,16 @@ router.get('/:id/download', authenticate, async (req, res) => {
 
     if (file.leadId && file.lead && !canAccessLeadByManager(req as AuthRequest, file.lead.managerId)) {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
+    }
+
+    if (file.projectSaleId && file.projectSale) {
+      if (
+        req.userRole !== 'ADMIN' &&
+        file.projectSale.managerId !== req.userId &&
+        file.uploadedBy !== req.userId
+      ) {
+        return res.status(403).json({ error: 'Недостаточно прав доступа' });
+      }
     }
 
     if (file.orderId) {
@@ -251,8 +328,21 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
     }
 
     // Для файлов заказов — полный доступ всем ролям.
+    // Для файлов проектных продаж — ответственный менеджер, загрузивший или админ.
     // Для остальных файлов действует правило "загрузивший или админ".
-    if (!file.orderId && file.uploadedBy !== req.userId && req.userRole !== 'ADMIN') {
+    if (file.projectSaleId) {
+      const sale = await prisma.projectSale.findUnique({
+        where: { id: file.projectSaleId },
+        select: { managerId: true },
+      });
+      const ok =
+        req.userRole === 'ADMIN' ||
+        file.uploadedBy === req.userId ||
+        (sale && sale.managerId === req.userId);
+      if (!ok) {
+        return res.status(403).json({ error: 'Недостаточно прав доступа' });
+      }
+    } else if (!file.orderId && file.uploadedBy !== req.userId && req.userRole !== 'ADMIN') {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 
