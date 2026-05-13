@@ -79,6 +79,53 @@ function canManageProjectSale(req: AuthRequest, managerId: string): boolean {
   return req.userId === managerId;
 }
 
+/** Нормализация «Имя Фамилия» для сопоставления с белым списком менеджеров воронки */
+function normalizeManagerKey(firstName: string, lastName: string): string {
+  return `${firstName} ${lastName}`
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .trim();
+}
+
+/**
+ * Только эти менеджеры попадают в списки назначения (проектные продажи, передача клиента).
+ * Порядок — как у заказчика. Лишние роли (например, другие руководители) не показываем.
+ */
+const PROJECT_SALES_MANAGER_ORDER: string[] = [
+  'гинтарас палтарацкас',
+  'нариман алескеров',
+  'максим шалагинов',
+  'антон федотов',
+  'георгий мониава',
+  'роман хрусталев',
+  'никита царьков',
+];
+
+/** Варианты написания в БД → канонический ключ из PROJECT_SALES_MANAGER_ORDER */
+const MANAGER_KEY_ALIASES: Record<string, string> = {
+  'палтарацкас гинтарас': 'гинтарас палтарацкас',
+  'нариман аляскеров': 'нариман алескеров',
+};
+
+function canonicalProjectSalesManagerKey(firstName: string, lastName: string): string | null {
+  const raw = normalizeManagerKey(firstName, lastName);
+  const key = MANAGER_KEY_ALIASES[raw] ?? raw;
+  const allowed = new Set(PROJECT_SALES_MANAGER_ORDER);
+  return allowed.has(key) ? key : null;
+}
+
+function filterAndSortProjectSalesManagers<T extends { firstName: string; lastName: string }>(
+  users: T[]
+): T[] {
+  const decorated = users
+    .map((u) => ({ u, key: canonicalProjectSalesManagerKey(u.firstName, u.lastName) }))
+    .filter((x): x is { u: T; key: string } => x.key !== null);
+  decorated.sort(
+    (a, b) => PROJECT_SALES_MANAGER_ORDER.indexOf(a.key) - PROJECT_SALES_MANAGER_ORDER.indexOf(b.key)
+  );
+  return decorated.map((x) => x.u);
+}
+
 const saleInclude = {
   client: {
     select: { id: true, name: true, company: true, phone: true, notes: true },
@@ -118,7 +165,7 @@ router.get('/managers', authenticate, async (_req, res) => {
       },
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     });
-    res.json(users);
+    res.json(filterAndSortProjectSalesManagers(users));
   } catch (error) {
     console.error('project-sales managers error:', error);
     res.status(500).json({ error: 'Ошибка при загрузке менеджеров' });
@@ -502,10 +549,17 @@ router.post('/batch', authenticate, async (req: AuthRequest, res) => {
     const managerIds = [...new Set(cleaned.map((i) => i.managerId))];
     const managers = await prisma.user.findMany({
       where: { id: { in: managerIds }, isActive: true },
-      select: { id: true },
+      select: { id: true, firstName: true, lastName: true },
     });
     if (managers.length !== managerIds.length) {
       return res.status(400).json({ error: 'Указан неизвестный или неактивный менеджер' });
+    }
+    for (const u of managers) {
+      if (canonicalProjectSalesManagerKey(u.firstName, u.lastName) === null) {
+        return res.status(400).json({
+          error: `Менеджер ${u.firstName} ${u.lastName} не входит в список назначения проектных продаж`,
+        });
+      }
     }
 
     const created = await prisma.$transaction(async (tx) => {

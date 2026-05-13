@@ -415,6 +415,9 @@ router.get('/:id', authenticate, async (req, res) => {
           select: {
             id: true,
             stage: true,
+            orderBrief: true,
+            orderKind: true,
+            rejectionReason: true,
             manager: {
               select: {
                 id: true,

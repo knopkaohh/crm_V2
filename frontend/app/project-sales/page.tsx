@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useRouter } from 'next/navigation'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
+import { apiCache } from '@/lib/cache'
 import { auth, type User } from '@/lib/auth'
-import { Kanban, Plus, Loader2, UserCircle, Building2, X, ExternalLink, Paperclip } from 'lucide-react'
+import { Kanban, Plus, Loader2, UserCircle, Building2, X, Paperclip } from 'lucide-react'
 
 type ProjectSaleStage =
   | 'NEW_BRANDS'
@@ -54,16 +55,15 @@ const STAGES: { id: ProjectSaleStage; label: string }[] = [
   { id: 'NOT_OUR_CLIENT', label: 'Не наш клиент' },
 ]
 
-/** Порядок имён как у вас в списке (для сортировки выпадающих списков) */
+/** Совпадает с бэкендом: только эти менеджеры (порядок для сортировки, если API изменится) */
 const MANAGER_ORDER_KEYS = [
+  'гинтарас палтарацкас',
+  'нариман алескеров',
+  'максим шалагинов',
   'антон федотов',
   'георгий мониава',
-  'хрусталев роман',
-  'палтарацкас гинтарас',
-  'царьков никита',
-  'алескеров нариман',
-  'шалагинов максим',
-  'пендус владислав',
+  'роман хрусталев',
+  'никита царьков',
 ]
 
 function normalizeManagerKey(firstName: string, lastName: string): string {
@@ -307,6 +307,7 @@ export default function ProjectSalesPage() {
     try {
       const res = await api.post('/project-sales/batch', { items: payload })
       const created = res.data as ProjectSaleRow[]
+      apiCache.invalidatePattern('project-sales')
       setItems((prev) => [...created, ...prev])
       setModalOpen(false)
     } catch (err) {
@@ -321,6 +322,7 @@ export default function ProjectSalesPage() {
   }
 
   const mergeRow = (updated: ProjectSaleRow) => {
+    apiCache.invalidatePattern('project-sales')
     setItems((list) => list.map((i) => (i.id === updated.id ? updated : i)))
   }
 
@@ -566,9 +568,10 @@ export default function ProjectSalesPage() {
                         draggable={draggable}
                         onDragStart={(e) => onDragStartCard(e, row)}
                         onDragEnd={onDragEndCard}
+                        onClick={() => router.push(`/clients/${row.client.id}`)}
                         className={`rounded-2xl border border-gray-200 p-3 shadow-sm hover:shadow-md transition-shadow border-l-4 ${indicator.border} ${indicator.bg} relative ${
                           dragId === row.id ? 'opacity-50' : ''
-                        } ${draggable ? 'cursor-move' : 'cursor-default'}`}
+                        } ${draggable ? 'cursor-move' : 'cursor-pointer'}`}
                       >
                         <div className="flex items-start justify-between mb-2 gap-2">
                           <h4 className="font-medium text-gray-900 text-sm leading-snug pr-1">{brandTitle(row)}</h4>
@@ -654,43 +657,47 @@ export default function ProjectSalesPage() {
                           </p>
                         )}
 
-                        {row.stage === 'ORDER_PLACED' && row.orderBrief && (
-                          <p className="mt-2 text-[11px] text-gray-600 line-clamp-3">{row.orderBrief}</p>
-                        )}
-
-                        {row.stage === 'ORDER_PLACED' && row.files && row.files.length > 0 && (
-                          <ul className="mt-2 space-y-1">
-                            {row.files.map((f) => (
-                              <li key={f.id}>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    void downloadProjectFile(f.id, f.originalName)
-                                  }}
-                                  className="inline-flex max-w-full items-center gap-1 text-[11px] font-medium text-primary-600 hover:text-primary-800 truncate"
+                        {row.stage === 'ORDER_PLACED' &&
+                          (row.orderKind || row.orderBrief || (row.files && row.files.length > 0)) && (
+                            <div className="mt-2 space-y-1.5 rounded-lg border border-emerald-100 bg-emerald-50/50 px-2 py-2">
+                              {row.orderKind ? (
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+                                  {row.orderKind === 'SAMPLES' ? 'Образцы' : 'Заказ'}
+                                </p>
+                              ) : null}
+                              {row.orderBrief ? (
+                                <p
+                                  className="text-[11px] text-gray-700 whitespace-pre-wrap break-words"
+                                  title={row.orderBrief}
                                 >
-                                  <Paperclip className="h-3 w-3 shrink-0" />
-                                  <span className="truncate">{f.originalName}</span>
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-
-                        <div className="mt-3 flex items-center justify-between gap-2 border-t border-gray-100 pt-2">
-                          <button
-                            type="button"
-                            onClick={() => router.push(`/clients/${row.client.id}`)}
-                            className="inline-flex items-center gap-1 text-[11px] font-medium text-primary-600 hover:text-primary-800"
-                          >
-                            Карточка клиента
-                            <ExternalLink className="h-3 w-3" />
-                          </button>
-                          {!canAct && (
-                            <span className="text-[10px] text-gray-400 text-right">Только просмотр</span>
+                                  {row.orderBrief}
+                                </p>
+                              ) : null}
+                              {row.files && row.files.length > 0 ? (
+                                <ul className="space-y-1 border-t border-emerald-100/80 pt-1.5">
+                                  {row.files.map((f) => (
+                                    <li key={f.id}>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          void downloadProjectFile(f.id, f.originalName)
+                                        }}
+                                        className="inline-flex max-w-full items-center gap-1 text-[11px] font-medium text-primary-600 hover:text-primary-800 truncate"
+                                      >
+                                        <Paperclip className="h-3 w-3 shrink-0" />
+                                        <span className="truncate">{f.originalName}</span>
+                                      </button>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                            </div>
                           )}
-                        </div>
+
+                        {!canAct && (
+                          <p className="mt-2 text-[10px] text-gray-400 text-right">Только просмотр</p>
+                        )}
                       </div>
                     )
                   })}

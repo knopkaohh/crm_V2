@@ -77,6 +77,9 @@ interface Client {
   projectSales?: {
     id: string
     stage: string
+    orderBrief?: string | null
+    orderKind?: 'SAMPLES' | 'ORDER' | null
+    rejectionReason?: string | null
     manager: UserRef
     files: FileItem[]
   }[]
@@ -596,6 +599,86 @@ export default function ClientDetailPage() {
             </div>
           </div>
         </div>
+
+        {(client.projectSales?.length ?? 0) > 0 && (
+          <div className="rounded-3xl border border-emerald-100 bg-gradient-to-r from-emerald-50/80 via-white to-white p-6 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-800">
+                Проектные продажи
+              </h3>
+              <Link
+                href="/project-sales"
+                className="text-xs font-medium text-primary-600 hover:text-primary-800"
+              >
+                Открыть воронку →
+              </Link>
+            </div>
+            <div className="space-y-4">
+              {(client.projectSales ?? []).map((ps) => {
+                const stageLabels: Record<string, string> = {
+                  NEW_BRANDS: 'Новые бренды',
+                  IN_PROGRESS: 'Бренды в работе',
+                  INTERESTED: 'Заинтересованные',
+                  ORDER_PLACED: 'Оформили заказ/образец',
+                  NOT_OUR_CLIENT: 'Не наш клиент',
+                }
+                const stageLabel = stageLabels[ps.stage] ?? ps.stage
+                const kindLabel =
+                  ps.orderKind === 'SAMPLES' ? 'Образцы' : ps.orderKind === 'ORDER' ? 'Заказ' : null
+                return (
+                  <div
+                    key={ps.id}
+                    className="rounded-2xl border border-gray-200 bg-white/90 p-4 shadow-sm"
+                  >
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+                      <span className="font-medium text-gray-900">{stageLabel}</span>
+                      <span className="text-xs text-gray-500">
+                        {ps.manager.firstName} {ps.manager.lastName}
+                      </span>
+                    </div>
+                    {ps.stage === 'NOT_OUR_CLIENT' && ps.rejectionReason ? (
+                      <p className="text-sm text-rose-700 whitespace-pre-wrap">{ps.rejectionReason}</p>
+                    ) : null}
+                    {ps.stage === 'ORDER_PLACED' && (ps.orderBrief || (ps.files?.length ?? 0) > 0 || kindLabel) ? (
+                      <div className="mt-2 space-y-2 border-t border-gray-100 pt-3">
+                        {kindLabel ? (
+                          <p className="text-xs font-semibold text-emerald-800">{kindLabel}</p>
+                        ) : null}
+                        {ps.orderBrief ? (
+                          <div>
+                            <p className="text-xs font-medium text-gray-500 mb-1">Техническое задание</p>
+                            <p className="text-sm text-gray-800 whitespace-pre-wrap">{ps.orderBrief}</p>
+                          </div>
+                        ) : null}
+                        {ps.files && ps.files.length > 0 ? (
+                          <div>
+                            <p className="text-xs font-medium text-gray-500 mb-1">Макеты</p>
+                            <ul className="space-y-1">
+                              {ps.files.map((f) => (
+                                <li key={f.id}>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleDownloadClientFile(f.id, f.originalName)
+                                    }
+                                    disabled={downloadingFileId === f.id}
+                                    className="text-sm text-primary-600 hover:text-primary-800 disabled:opacity-50"
+                                  >
+                                    {f.originalName}
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-xl shadow-primary-900/5">
           <p className="text-sm text-gray-500 mb-2">Клиент</p>
