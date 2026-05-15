@@ -88,42 +88,77 @@ function normalizeManagerKey(firstName: string, lastName: string): string {
 }
 
 /**
- * Только эти менеджеры попадают в списки назначения (проектные продажи, передача клиента).
- * Порядок — как у заказчика. Лишние роли (например, другие руководители) не показываем.
+ * Белый список менеджеров воронки (порядок как в CRM).
+ * emails — надёжное сопоставление (роль ADMIN/TECHNOLOGIST и т.д. не мешает).
+ * keys — варианты «имя фамилия» / «фамилия имя» в БД.
  */
-const PROJECT_SALES_MANAGER_ORDER: string[] = [
-  'гинтарас палтарацкас',
-  'нариман алескеров',
-  'максим шалагинов',
-  'антон федотов',
-  'георгий мониава',
-  'роман хрусталев',
-  'никита царьков',
+const PROJECT_SALES_MANAGER_SLOTS: {
+  sortOrder: number;
+  keys: string[];
+  emails?: string[];
+}[] = [
+  {
+    sortOrder: 0,
+    keys: ['гинтарас палтарацкас', 'палтарацкас гинтарас'],
+    emails: ['gintar+lera@mail.ru'],
+  },
+  {
+    sortOrder: 1,
+    keys: ['нариман алескеров', 'нариман аляскеров', 'алескеров нариман'],
+    emails: ['aleskerov98@mail.ru'],
+  },
+  {
+    sortOrder: 2,
+    keys: ['максим шалагинов', 'шалагинов максим'],
+  },
+  {
+    sortOrder: 3,
+    keys: ['антон федотов', 'федотов антон'],
+    emails: ['antonfedtube@gmail.com'],
+  },
+  {
+    sortOrder: 4,
+    keys: ['георгий мониава', 'мониава георгий'],
+    emails: ['gmoniava15@gmail.com'],
+  },
+  {
+    sortOrder: 5,
+    keys: ['роман хрусталев', 'хрусталев роман'],
+    emails: ['hrystalb@bk.ru'],
+  },
+  {
+    sortOrder: 6,
+    keys: ['никита царьков', 'царьков никита'],
+    emails: ['hnikita@gmail.com'],
+  },
 ];
 
-/** Варианты написания в БД → канонический ключ из PROJECT_SALES_MANAGER_ORDER */
-const MANAGER_KEY_ALIASES: Record<string, string> = {
-  'палтарацкас гинтарас': 'гинтарас палтарацкас',
-  'нариман аляскеров': 'нариман алескеров',
-};
-
-function canonicalProjectSalesManagerKey(firstName: string, lastName: string): string | null {
-  const raw = normalizeManagerKey(firstName, lastName);
-  const key = MANAGER_KEY_ALIASES[raw] ?? raw;
-  const allowed = new Set(PROJECT_SALES_MANAGER_ORDER);
-  return allowed.has(key) ? key : null;
+function projectSalesManagerSortOrder(user: {
+  firstName: string;
+  lastName: string;
+  email: string;
+}): number | null {
+  const nameKey = normalizeManagerKey(user.firstName, user.lastName);
+  const emailLower = user.email.toLowerCase();
+  for (const slot of PROJECT_SALES_MANAGER_SLOTS) {
+    if (slot.emails?.some((e) => e.toLowerCase() === emailLower)) {
+      return slot.sortOrder;
+    }
+    if (slot.keys.includes(nameKey)) {
+      return slot.sortOrder;
+    }
+  }
+  return null;
 }
 
-function filterAndSortProjectSalesManagers<T extends { firstName: string; lastName: string }>(
-  users: T[]
-): T[] {
-  const decorated = users
-    .map((u) => ({ u, key: canonicalProjectSalesManagerKey(u.firstName, u.lastName) }))
-    .filter((x): x is { u: T; key: string } => x.key !== null);
-  decorated.sort(
-    (a, b) => PROJECT_SALES_MANAGER_ORDER.indexOf(a.key) - PROJECT_SALES_MANAGER_ORDER.indexOf(b.key)
-  );
-  return decorated.map((x) => x.u);
+function filterAndSortProjectSalesManagers<
+  T extends { firstName: string; lastName: string; email: string },
+>(users: T[]): T[] {
+  return users
+    .map((u) => ({ u, order: projectSalesManagerSortOrder(u) }))
+    .filter((x): x is { u: T; order: number } => x.order !== null)
+    .sort((a, b) => a.order - b.order)
+    .map((x) => x.u);
 }
 
 const saleInclude = {
@@ -139,16 +174,27 @@ const saleInclude = {
   },
 } as const;
 
-/** Менеджеры для выпадающих списков: активные, с ролью продаж / клиентский менеджер */
+/** Менеджеры для выпадающих списков: только белый список (по email и ФИО), любая роль */
 router.get('/managers', authenticate, async (_req, res) => {
   try {
+    const knownEmails = PROJECT_SALES_MANAGER_SLOTS.flatMap((s) => s.emails ?? []);
+
     const users = await prisma.user.findMany({
       where: {
         isActive: true,
         OR: [
+          ...(knownEmails.length > 0
+            ? [{ email: { in: knownEmails, mode: 'insensitive' as const } }]
+            : []),
           {
             role: {
-              in: [UserRole.SALES_MANAGER, UserRole.CLIENT_MANAGER, UserRole.EXECUTIVE],
+              in: [
+                UserRole.SALES_MANAGER,
+                UserRole.CLIENT_MANAGER,
+                UserRole.EXECUTIVE,
+                UserRole.ADMIN,
+                UserRole.TECHNOLOGIST,
+              ],
             },
           },
           { secondaryRoles: { has: UserRole.SALES_MANAGER } },
@@ -163,7 +209,6 @@ router.get('/managers', authenticate, async (_req, res) => {
         email: true,
         role: true,
       },
-      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     });
     res.json(filterAndSortProjectSalesManagers(users));
   } catch (error) {
@@ -549,13 +594,13 @@ router.post('/batch', authenticate, async (req: AuthRequest, res) => {
     const managerIds = [...new Set(cleaned.map((i) => i.managerId))];
     const managers = await prisma.user.findMany({
       where: { id: { in: managerIds }, isActive: true },
-      select: { id: true, firstName: true, lastName: true },
+      select: { id: true, firstName: true, lastName: true, email: true },
     });
     if (managers.length !== managerIds.length) {
       return res.status(400).json({ error: 'Указан неизвестный или неактивный менеджер' });
     }
     for (const u of managers) {
-      if (canonicalProjectSalesManagerKey(u.firstName, u.lastName) === null) {
+      if (projectSalesManagerSortOrder(u) === null) {
         return res.status(400).json({
           error: `Менеджер ${u.firstName} ${u.lastName} не входит в список назначения проектных продаж`,
         });
