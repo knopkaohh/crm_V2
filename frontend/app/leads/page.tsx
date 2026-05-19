@@ -27,6 +27,7 @@ import {
   ShoppingCart,
   UserX,
   CalendarRange,
+  CalendarClock,
   ChevronLeft,
   ChevronRight,
   Search,
@@ -96,7 +97,7 @@ interface OrderFormState {
   positions: OrderPosition[]
 }
 
-type LeadModalType = 'notes' | 'order' | 'close' | 'delete' | null
+type LeadModalType = 'notes' | 'order' | 'close' | 'delete' | 'nextContact' | null
 
 const statusLabels: Record<string, string> = {
   NEW_LEAD: 'Новый лид',
@@ -251,6 +252,27 @@ const extractLeadDetails = (description: string | null | undefined) => {
   }
 }
 
+/** Дописывает результат звонка в блок «Заметки» описания лида */
+function appendContactResultToLeadDescription(
+  existing: string | null | undefined,
+  resultText: string
+): string {
+  const contactedLabel = new Date().toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  const entry = `${contactedLabel} — ${resultText.trim()}`
+  const { contactPurpose, notes } = extractLeadDetails(existing)
+  const mergedNotes = notes ? `${notes}\n\n${entry}` : entry
+  if (contactPurpose.trim()) {
+    return `Цель контакта: ${contactPurpose.trim()}\n\nЗаметки:\n${mergedNotes}`
+  }
+  return `Заметки:\n${mergedNotes}`
+}
+
 export default function LeadsPage() {
   const router = useRouter()
   const [currentUser, setCurrentUser] = useState<User | null>(null)
@@ -285,6 +307,10 @@ export default function LeadsPage() {
   }))
 
   const [modalType, setModalType] = useState<LeadModalType>(null)
+  const [nextContactForm, setNextContactForm] = useState({
+    result: '',
+    nextContactDate: getTomorrowNoon(),
+  })
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [selectedLeadDetails, setSelectedLeadDetails] = useState<LeadDetails | null>(null)
   const [modalLoading, setModalLoading] = useState(false)
@@ -640,6 +666,38 @@ export default function LeadsPage() {
     setEditingNextContactDate(false)
     setNextContactDateValue('')
     setUpdatingNextContactDate(false)
+    setNextContactForm({ result: '', nextContactDate: getTomorrowNoon() })
+  }
+
+  const handleSubmitNextContact = async () => {
+    if (!selectedLead) return
+    if (!nextContactForm.result.trim()) {
+      alert('Укажите результат контакта')
+      return
+    }
+    if (!nextContactForm.nextContactDate) {
+      alert('Укажите дату следующего контакта')
+      return
+    }
+
+    setModalActionLoading(true)
+    try {
+      const description = appendContactResultToLeadDescription(
+        selectedLead.description,
+        nextContactForm.result
+      )
+      await api.put(`/leads/${selectedLead.id}`, {
+        nextContactDate: new Date(nextContactForm.nextContactDate).toISOString(),
+        description,
+      })
+      resetModalState()
+      await loadLeads({ showSpinner: false })
+    } catch (error) {
+      console.error('Failed to save next contact:', error)
+      alert('Не удалось сохранить следующий контакт')
+    } finally {
+      setModalActionLoading(false)
+    }
   }
 
   const formatDateForInput = (dateString: string | null) => {
@@ -686,6 +744,14 @@ export default function LeadsPage() {
     setCloseReason('')
     setEditingNextContactDate(false)
     setNextContactDateValue(formatDateForInput(lead.nextContactDate))
+
+    if (type === 'nextContact') {
+      setNextContactForm({
+        result: '',
+        nextContactDate: getTomorrowNoon(),
+      })
+      return
+    }
 
     // Для заметок сразу показываем данные из lead, детали загружаем асинхронно
     if (type === 'notes') {
@@ -1115,6 +1181,7 @@ export default function LeadsPage() {
     showDate = false,
     onOpenNotes,
     onOpenOrder,
+    onNextContact,
     onCloseContact,
     onDeleteLead,
     onQuickReschedule,
@@ -1126,6 +1193,7 @@ export default function LeadsPage() {
     showDate?: boolean
     onOpenNotes: () => void
     onOpenOrder: () => void
+    onNextContact: () => void
     onCloseContact: () => void
     onDeleteLead: () => void
     onQuickReschedule: (days: number) => void
@@ -1359,6 +1427,18 @@ export default function LeadsPage() {
             >
               <ShoppingCart className="h-4 w-4" />
               Заказ
+            </button>
+            <button
+              type="button"
+              className={`${actionButtonBase} text-violet-600 hover:text-violet-700`}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onNextContact()
+              }}
+            >
+              <CalendarClock className="h-4 w-4" />
+              Следующий контакт
             </button>
             <button
               type="button"
@@ -1870,6 +1950,7 @@ export default function LeadsPage() {
                       onQuickReschedule={(days) => handleQuickReschedule(lead, days)}
                       onOpenNotes={() => openLeadModal(lead, 'notes')}
                       onOpenOrder={() => openLeadModal(lead, 'order')}
+                      onNextContact={() => openLeadModal(lead, 'nextContact')}
                       onCloseContact={() => openLeadModal(lead, 'close')}
                       onDeleteLead={() => openLeadModal(lead, 'delete')}
                     />
@@ -1912,6 +1993,7 @@ export default function LeadsPage() {
                       onQuickReschedule={(days) => handleQuickReschedule(lead, days)}
                       onOpenNotes={() => openLeadModal(lead, 'notes')}
                       onOpenOrder={() => openLeadModal(lead, 'order')}
+                      onNextContact={() => openLeadModal(lead, 'nextContact')}
                       onCloseContact={() => openLeadModal(lead, 'close')}
                       onDeleteLead={() => openLeadModal(lead, 'delete')}
                     />
@@ -2487,6 +2569,86 @@ export default function LeadsPage() {
               />
             </div>
           </form>
+        )}
+      </Modal>
+
+      <Modal
+        open={modalType === 'nextContact'}
+        title="Следующий контакт"
+        onClose={resetModalState}
+        footer={
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={resetModalState}
+              className="inline-flex items-center justify-center rounded-xl border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              disabled={modalActionLoading}
+              onClick={handleSubmitNextContact}
+              className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:opacity-60"
+            >
+              {modalActionLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                'Сохранить'
+              )}
+            </button>
+          </div>
+        }
+      >
+        {selectedLead ? (
+          <div className="space-y-5">
+            <div className="rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-700">
+              <div className="font-semibold text-gray-900">
+                {selectedLead.client.name}
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Результат разговора сохранится в заметках контакта, дата перенесётся
+                на выбранный день.
+              </p>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Результат контакта <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={nextContactForm.result}
+                onChange={(event) =>
+                  setNextContactForm((prev) => ({
+                    ...prev,
+                    result: event.target.value,
+                  }))
+                }
+                rows={4}
+                placeholder="О чём договорились с клиентом, что обсудили"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-violet-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Дата следующего контакта <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="datetime-local"
+                value={nextContactForm.nextContactDate}
+                onChange={(event) =>
+                  setNextContactForm((prev) => ({
+                    ...prev,
+                    nextContactDate: event.target.value,
+                  }))
+                }
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-violet-500"
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="flex h-32 items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-violet-600" />
+          </div>
         )}
       </Modal>
 
