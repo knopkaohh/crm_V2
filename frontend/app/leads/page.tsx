@@ -14,7 +14,7 @@ import { useRouter } from 'next/navigation'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
 import { auth, type User } from '@/lib/auth'
-import { canHardDeleteLead, canViewAllLeads } from '@/lib/leads-permissions'
+import { canHardDeleteLead } from '@/lib/leads-permissions'
 import {
   Plus,
   Calendar,
@@ -228,15 +228,12 @@ const FILTER_SOURCE_OPTIONS = [
   'Постоянные клиенты',
   'Сарафанное радио',
 ]
-const FILTER_MANAGER_OPTIONS = [
-  'Антон Федотов',
-  'Мониава Георгий',
-  'Хрусталёв Роман',
-  'Палтарацкас Гинтарас',
-  'Алескеров Нариман',
-  'Царьков Никита',
-  'Пендус Владислав',
-]
+interface LeadManagerOption {
+  id: string
+  firstName: string
+  lastName: string
+  role: string
+}
 
 const extractLeadDetails = (description: string | null | undefined) => {
   if (!description) {
@@ -262,6 +259,7 @@ export default function LeadsPage() {
   const [loading, setLoading] = useState(true)
   const [sourceFilter, setSourceFilter] = useState('all')
   const [managerFilter, setManagerFilter] = useState('all')
+  const [managerOptions, setManagerOptions] = useState<LeadManagerOption[]>([])
   const [contactsSearchInput, setContactsSearchInput] = useState('')
   const [contactsSearchDebounced, setContactsSearchDebounced] = useState('')
   const [reschedulingLeadId, setReschedulingLeadId] = useState<string | null>(null)
@@ -325,14 +323,8 @@ export default function LeadsPage() {
 
   const applyLeadFilters = (lead: Lead) => {
     const sourceMatches = sourceFilter === 'all' || (lead.source ?? '') === sourceFilter
-    const managerName = lead.manager
-      ? `${lead.manager.firstName} ${lead.manager.lastName}`.trim()
-      : ''
     const managerMatches =
-      managerFilter === 'all' ||
-      (managerFilter === 'unassigned'
-        ? !lead.manager
-        : managerName === managerFilter)
+      managerFilter === 'all' || lead.manager?.id === managerFilter
     return sourceMatches && managerMatches
   }
 
@@ -585,8 +577,13 @@ export default function LeadsPage() {
 
   const loadLeads = useCallback(async (options?: { showSpinner?: boolean }) => {
     const showSpinner = options?.showSpinner ?? true
-    const searchParams =
-      contactsSearchDebounced.length > 0 ? { search: contactsSearchDebounced } : {}
+    const searchParams: Record<string, string> = {}
+    if (contactsSearchDebounced.length > 0) {
+      searchParams.search = contactsSearchDebounced
+    }
+    if (managerFilter !== 'all') {
+      searchParams.managerId = managerFilter
+    }
 
     if (showSpinner) {
       setLoading(true)
@@ -594,11 +591,13 @@ export default function LeadsPage() {
     try {
       const todayResponse = await api.get('/leads', {
         params: { contactDateFilter: 'today', ...searchParams },
+        headers: { 'X-Skip-Cache': '1' },
       })
       setTodayLeads(todayResponse.data.data || [])
 
       const futureResponse = await api.get('/leads', {
         params: { contactDateFilter: 'future', ...searchParams },
+        headers: { 'X-Skip-Cache': '1' },
       })
       setFutureLeads(futureResponse.data.data || [])
     } catch (error) {
@@ -608,7 +607,18 @@ export default function LeadsPage() {
         setLoading(false)
       }
     }
-  }, [contactsSearchDebounced])
+  }, [contactsSearchDebounced, managerFilter])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await api.get('/leads/managers', { headers: { 'X-Skip-Cache': '1' } })
+        setManagerOptions(res.data as LeadManagerOption[])
+      } catch (error) {
+        console.error('Failed to load manager filter options:', error)
+      }
+    })()
+  }, [])
 
   useEffect(() => {
     void loadLeads({ showSpinner: contactsInitialLoadRef.current })
@@ -1426,7 +1436,7 @@ export default function LeadsPage() {
             </p>
           </div>
           <div
-            className={`grid gap-3 ${canViewAllLeads(currentUser) ? 'sm:grid-cols-2' : ''}`}
+            className="grid gap-3 sm:grid-cols-2"
           >
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -1445,25 +1455,23 @@ export default function LeadsPage() {
               ))}
             </select>
           </div>
-          {canViewAllLeads(currentUser) ? (
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Фильтр по менеджеру
-              </label>
-              <select
-                value={managerFilter}
-                onChange={(event) => setManagerFilter(event.target.value)}
-                className="w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
-              >
-                <option value="all">Все менеджеры</option>
-                {FILTER_MANAGER_OPTIONS.map((manager) => (
-                  <option key={manager} value={manager}>
-                    {manager}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Фильтр по менеджеру
+            </label>
+            <select
+              value={managerFilter}
+              onChange={(event) => setManagerFilter(event.target.value)}
+              className="w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="all">Все менеджеры</option>
+              {managerOptions.map((manager) => (
+                <option key={manager.id} value={manager.id}>
+                  {manager.firstName} {manager.lastName}
+                </option>
+              ))}
+            </select>
+          </div>
           </div>
         </div>
 

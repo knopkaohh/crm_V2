@@ -1,16 +1,16 @@
 import { AuthRequest } from '../middleware/auth';
 
-const FULL_ACCESS_ROLES = new Set(['EXECUTIVE']);
+const HARD_DELETE_ROLES = new Set(['EXECUTIVE', 'ADMIN']);
 
-/** Все контакты: только руководитель отдела продаж (EXECUTIVE). */
+/** Все контакты: любой авторизованный пользователь CRM. */
 export function canViewAllLeads(req: AuthRequest): boolean {
-  if (!req.userId || !req.userRole) return false;
-  return FULL_ACCESS_ROLES.has(req.userRole);
+  return Boolean(req.userId);
 }
 
-/** Полное удаление лида без архива — только те же роли/пользователи, что и «все контакты». */
+/** Полное удаление лида без архива — руководитель отдела продаж или администратор. */
 export function canDeleteLead(req: AuthRequest): boolean {
-  return canViewAllLeads(req);
+  if (!req.userRole) return false;
+  return HARD_DELETE_ROLES.has(req.userRole);
 }
 
 export function canAccessLeadByManager(req: AuthRequest, managerId: string | null): boolean {

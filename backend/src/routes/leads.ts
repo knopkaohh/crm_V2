@@ -134,6 +134,26 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
+/** Список пользователей для фильтра «Менеджер» на вкладке Контакты */
+router.get('/managers', authenticate, async (_req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      where: { isActive: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+      },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+    });
+    res.json(users);
+  } catch (error) {
+    console.error('Get lead managers error:', error);
+    res.status(500).json({ error: 'Ошибка при загрузке списка менеджеров' });
+  }
+});
+
 // Получить лид по ID
 router.get('/:id', authenticate, async (req: AuthRequest, res) => {
   try {
