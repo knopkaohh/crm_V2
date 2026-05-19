@@ -85,7 +85,8 @@ function extractMaterial(itemName: string): string {
     'Флекстран',
     'Жаккард',
     'Картонная навесная бирка',
-    'ZIP-Lock пакет'
+    'ZIP-Lock пакет',
+    'ПВХ Патч',
   ]
   
   for (const material of materials) {

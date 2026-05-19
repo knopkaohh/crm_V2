@@ -5,6 +5,12 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
 import { openInvoicePdfPlaceholderTab, showInvoicePdfFromBlob } from '@/lib/openInvoicePdf'
+import {
+  MATERIAL_OTHER,
+  ORDER_MATERIAL_OPTIONS,
+  isDesignOnlyMaterial,
+  resolveOrderMaterial,
+} from '@/lib/order-materials'
 import { User, Phone, Building2, Package, Calendar, CreditCard, Trash2, FileText } from 'lucide-react'
 
 const CONTACT_METHODS = [
@@ -66,7 +72,9 @@ export default function NewOrderPage() {
     orderNumber: '',
     source: querySource || 'Сайт',
     managerId: '',
-    positions: [{ material: '', size: '', quantity: '1', amount: '', deadline: '' }],
+    positions: [
+      { material: '', materialOther: '', size: '', quantity: '1', amount: '', deadline: '' },
+    ],
     paymentType: '',
     prepayment: '',
     postpayment: '',
@@ -191,7 +199,10 @@ export default function NewOrderPage() {
   const addPosition = () => {
     setFormData((prev) => ({
       ...prev,
-      positions: [...prev.positions, { material: '', size: '', quantity: '1', amount: '', deadline: '' }],
+      positions: [
+        ...prev.positions,
+        { material: '', materialOther: '', size: '', quantity: '1', amount: '', deadline: '' },
+      ],
     }))
   }
 
@@ -202,10 +213,18 @@ export default function NewOrderPage() {
     }))
   }
 
-  const updatePosition = (index: number, key: 'material' | 'size' | 'quantity' | 'amount' | 'deadline', value: string) => {
+  const updatePosition = (
+    index: number,
+    key: 'material' | 'materialOther' | 'size' | 'quantity' | 'amount' | 'deadline',
+    value: string
+  ) => {
     setFormData((prev) => {
       const next = [...prev.positions]
-      next[index] = { ...next[index], [key]: value }
+      const updated = { ...next[index], [key]: value }
+      if (key === 'material' && value !== MATERIAL_OTHER) {
+        updated.materialOther = ''
+      }
+      next[index] = updated
       return { ...prev, positions: next }
     })
   }
@@ -240,6 +259,17 @@ export default function NewOrderPage() {
       alert('Укажите телефон клиента')
       return
     }
+    for (let i = 0; i < formData.positions.length; i += 1) {
+      const pos = formData.positions[i]
+      if (!pos.material) {
+        alert(`Выберите материал для позиции ${i + 1}`)
+        return
+      }
+      if (pos.material === MATERIAL_OTHER && !pos.materialOther.trim()) {
+        alert(`Укажите название материала для позиции ${i + 1}`)
+        return
+      }
+    }
     const invoicePdfTab = openInvoicePdfPlaceholderTab()
     setLoading(true)
     try {
@@ -272,7 +302,7 @@ export default function NewOrderPage() {
 
       const totalAmount = formData.positions.reduce((sum, p) => sum + (parseFloat(p.amount || '0') || 0), 0)
       const items = formData.positions.map((p) => ({
-        name: `${p.material} ${p.size}`.trim(),
+        name: `${resolveOrderMaterial(p.material, p.materialOther)} ${p.size}`.trim(),
         quantity: parseInt(p.quantity || '0') || 0,
         price: parseFloat(p.amount || '0') || 0, // amount уже содержит итоговую стоимость позиции
         desiredDeadline: p.deadline && p.deadline.trim() ? new Date(p.deadline).toISOString() : null,
@@ -646,8 +676,8 @@ export default function NewOrderPage() {
 
                   <div className="space-y-4">
                     {/* Первая строка: Материал, Размеры */}
-                    <div className={`grid grid-cols-1 gap-4 ${p.material !== 'Разработка макетов' ? 'md:grid-cols-2' : ''}`}>
-                      <div>
+                    <div className={`grid grid-cols-1 gap-4 ${!isDesignOnlyMaterial(p.material) ? 'md:grid-cols-2' : ''}`}>
+                      <div className="space-y-3">
                         <label className="block text-xs font-semibold text-gray-600 mb-1.5">Материал</label>
                         <select
                           value={p.material}
@@ -655,20 +685,30 @@ export default function NewOrderPage() {
                           className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all bg-white"
                         >
                           <option value="">Выберите материал</option>
-                          <option value="Сатин классический">Сатин классический</option>
-                          <option value="Сатин премиум">Сатин премиум</option>
-                          <option value="Силикон">Силикон</option>
-                          <option value="Жаккард">Жаккард</option>
-                          <option value="Картонная навесная бирка">Картонная навесная бирка</option>
-                          <option value="Хлопок">Хлопок</option>
-                          <option value="Нейлон">Нейлон</option>
-                          <option value="ДТФ наклейки">ДТФ наклейки</option>
-                          <option value="Флекстран">Флекстран</option>
-                          <option value="ZIP-Lock пакет">ZIP-Lock пакет</option>
-                          <option value="Разработка макетов">Разработка макетов</option>
+                          {ORDER_MATERIAL_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
                         </select>
+                        {p.material === MATERIAL_OTHER && (
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                              Укажите материал
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="Например: термоэтикетка"
+                              value={p.materialOther}
+                              onChange={(e) =>
+                                updatePosition(idx, 'materialOther', e.target.value)
+                              }
+                              className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all"
+                            />
+                          </div>
+                        )}
                       </div>
-                      {p.material !== 'Разработка макетов' && (
+                      {!isDesignOnlyMaterial(p.material) && (
                         <div>
                           <label className="block text-xs font-semibold text-gray-600 mb-1.5">Размеры</label>
                           <input
