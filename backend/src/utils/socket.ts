@@ -1,15 +1,21 @@
 import { io } from '../server';
 import { prisma } from './prisma';
 import { sendTelegramToUsers } from './telegram';
-import { sendWebPushToUser } from './web-push';
+import { sendWebPushToUser, type WebPushPayload } from './web-push';
 import { UserRole } from '@prisma/client';
+
+export type NotificationPushOptions = Pick<
+  WebPushPayload,
+  'tag' | 'sound' | 'vibrate'
+>;
 
 export const sendNotification = async (
   userId: string,
   title: string,
   message: string,
   type: string,
-  link?: string
+  link?: string,
+  pushOptions?: NotificationPushOptions
 ) => {
   // Сохранить в БД
   const notification = await prisma.notification.create({
@@ -30,6 +36,7 @@ export const sendNotification = async (
     message,
     link,
     type,
+    ...pushOptions,
   }).catch((err) => console.error('[WebPush] send error:', err));
 
   return notification;

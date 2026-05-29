@@ -22,9 +22,18 @@ self.addEventListener('push', (event) => {
     body: payload.body || '',
     icon: '/icon.svg',
     badge: '/icon.svg',
-    data: { url: payload.url || '/' },
-    tag: 'crm-notification',
+    data: { url: payload.url || '/', type: payload.type || 'general' },
+    tag: payload.tag || 'crm-notification',
     renotify: true,
+  }
+
+  if (Array.isArray(payload.vibrate) && payload.vibrate.length > 0) {
+    options.vibrate = payload.vibrate
+  }
+
+  // Свой звук: только если файл есть на сервере; на iOS обычно игнорируется
+  if (payload.sound) {
+    options.sound = payload.sound
   }
 
   event.waitUntil(self.registration.showNotification(payload.title || 'Birka CRM', options))

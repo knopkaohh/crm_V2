@@ -7,6 +7,11 @@ import { prisma } from '../utils/prisma';
 import { generateOrderNumber } from '../utils/order-utils';
 import { notifyAllUsersAboutNewOrder } from '../utils/telegram';
 import { canAccessLeadByManager } from '../utils/leads-access';
+import { parseNotificationSettings } from '../utils/notification-settings';
+import {
+  formatNewOrderNotification,
+  NEW_ORDER_PUSH_OPTIONS,
+} from '../utils/order-notifications';
 
 const router = express.Router();
 
@@ -489,26 +494,43 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       },
     });
 
-    // Глобальное уведомление о новом заказе для всех пользователей в CRM
+    // Уведомление о новом заказе — всем активным пользователям (с учётом настроек)
     const allUsers = await prisma.user.findMany({
-      where: {
-        isActive: true,
-      },
-      select: {
-        id: true,
-      },
+      where: { isActive: true },
+      select: { id: true, notificationSettings: true },
     });
 
+    const { title: newOrderTitle, message: newOrderMessage } =
+      formatNewOrderNotification({
+        creatorFirstName: order.creator.firstName,
+        creatorLastName: order.creator.lastName,
+        orderNumber: order.orderNumber,
+        totalAmount: Number(order.totalAmount),
+      });
+
+    const newOrderLink = `/orders/${order.id}`;
+    const newOrderPush = {
+      tag: `${NEW_ORDER_PUSH_OPTIONS.tagPrefix}-${order.id}`,
+      sound: NEW_ORDER_PUSH_OPTIONS.sound,
+      vibrate: NEW_ORDER_PUSH_OPTIONS.vibrate,
+    };
+
     await Promise.all(
-      allUsers.map((user) =>
-        sendNotification(
-          user.id,
-          'Новый заказ',
-          `Создан новый заказ ${order.orderNumber} от ${order.client.name}`,
-          'order',
-          `/orders/${order.id}`
+      allUsers
+        .filter((user) => {
+          const settings = parseNotificationSettings(user.notificationSettings);
+          return settings.enabled !== false && settings.order.created !== false;
+        })
+        .map((user) =>
+          sendNotification(
+            user.id,
+            newOrderTitle,
+            newOrderMessage,
+            'order',
+            newOrderLink,
+            newOrderPush
+          )
         )
-      )
     );
 
     // Уведомление в Telegram всем пользователям, у которых подключен Telegram
@@ -519,34 +541,6 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       totalAmount: Number(order.totalAmount),
       managerFullName,
     });
-
-    // Уведомления
-    if (managerId && managerId !== req.userId) {
-      await sendNotification(
-        managerId,
-        'Новый заказ',
-        `Создан заказ ${orderNumber} от ${order.client.name}`,
-        'order',
-        `/orders/${order.id}`
-      );
-    }
-
-    // Уведомление технологам
-    const technologists = await prisma.user.findMany({
-      where: { role: 'TECHNOLOGIST', isActive: true },
-    });
-
-    await Promise.all(
-      technologists.map(tech =>
-        sendNotification(
-          tech.id,
-          'Новый заказ в производство',
-          `Поступил заказ ${orderNumber} от ${order.client.name}`,
-          'order',
-          `/orders/${order.id}`
-        )
-      )
-    );
 
     broadcastOrderUpdate(order.id, order);
 

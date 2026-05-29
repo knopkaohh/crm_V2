@@ -58,6 +58,11 @@ export type WebPushPayload = {
   message: string
   link?: string | null
   type?: string
+  /** Уникальный tag — отдельное уведомление в шторке (не затирает предыдущие) */
+  tag?: string
+  /** URL звука на сайте, напр. /sounds/new-order.mp3 (работает не на всех устройствах) */
+  sound?: string
+  vibrate?: number[]
 }
 
 export async function sendWebPushToUser(
@@ -86,6 +91,9 @@ export async function sendWebPushToUser(
     body: payload.message,
     url: resolveNotificationUrl(payload.link),
     type: payload.type || 'general',
+    tag: payload.tag,
+    sound: payload.sound,
+    vibrate: payload.vibrate,
   })
 
   await Promise.all(
