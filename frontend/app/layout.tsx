@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import { ToastProvider } from '@/components/ToastProvider'
 import { NotificationListener } from '@/components/NotificationListener'
+import { PushNotificationManager } from '@/components/PushNotificationManager'
 
 const inter = Inter({ subsets: ['latin', 'cyrillic'] })
 
@@ -37,6 +38,7 @@ export default function RootLayout({
       <body className={inter.className}>
         <ToastProvider>
           <NotificationListener />
+          <PushNotificationManager />
           {children}
         </ToastProvider>
       </body>

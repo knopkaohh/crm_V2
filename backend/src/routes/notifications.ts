@@ -1,6 +1,8 @@
 import express from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
+import { parseNotificationSettings } from '../utils/notification-settings';
+import { getVapidPublicKey, isWebPushConfigured } from '../utils/web-push';
 
 const router = express.Router();
 
@@ -136,49 +138,12 @@ router.get('/settings', authenticate, async (req: AuthRequest, res) => {
       select: { notificationSettings: true },
     });
 
-    // Дефолтные настройки
-    const defaultSettings = {
-      enabled: true,
-      task: {
-        assigned: true,
-        completed: true,
-        dueSoon: true,
-        overdue: true,
-      },
-      order: {
-        created: true,
-        statusChanged: true,
-        ready: true,
-        delivered: true,
-      },
-      lead: {
-        created: true,
-        statusChanged: true,
-        converted: true,
-      },
-      general: {
-        system: true,
-      },
-      desktop: true, // Всплывающие уведомления на рабочем столе
-    };
+    const settings = parseNotificationSettings(user?.notificationSettings);
 
-    let settings = defaultSettings;
-    
-    if (user?.notificationSettings) {
-      try {
-        // Если это JSON объект, парсим его
-        const userSettings = typeof user.notificationSettings === 'string' 
-          ? JSON.parse(user.notificationSettings) 
-          : user.notificationSettings;
-        settings = { ...defaultSettings, ...userSettings };
-      } catch (e) {
-        // Если ошибка парсинга, используем дефолтные настройки
-        console.error('Error parsing notification settings:', e);
-        settings = defaultSettings;
-      }
-    }
-
-    res.json(settings);
+    res.json({
+      ...settings,
+      pushConfigured: isWebPushConfigured(),
+    });
   } catch (error) {
     console.error('Get notification settings error:', error);
     res.status(500).json({ error: 'Ошибка при получении настроек уведомлений' });
@@ -199,6 +164,85 @@ router.put('/settings', authenticate, async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Update notification settings error:', error);
     res.status(500).json({ error: 'Ошибка при обновлении настроек уведомлений' });
+  }
+});
+
+// Публичный VAPID-ключ для подписки в браузере
+router.get('/push/vapid-public-key', authenticate, async (_req: AuthRequest, res) => {
+  const publicKey = getVapidPublicKey();
+  if (!publicKey) {
+    return res.status(503).json({
+      error: 'Web Push не настроен на сервере (нет VAPID ключей)',
+      configured: false,
+    });
+  }
+  res.json({ publicKey, configured: true });
+});
+
+// Сохранить подписку Web Push
+router.post('/push/subscribe', authenticate, async (req: AuthRequest, res) => {
+  try {
+    if (!isWebPushConfigured()) {
+      return res.status(503).json({ error: 'Web Push не настроен на сервере' });
+    }
+
+    const { endpoint, keys } = req.body as {
+      endpoint?: string
+      keys?: { p256dh?: string; auth?: string }
+    }
+
+    if (!endpoint || !keys?.p256dh || !keys?.auth) {
+      return res.status(400).json({ error: 'Некорректная подписка push' });
+    }
+
+    const userAgent =
+      typeof req.headers['user-agent'] === 'string'
+        ? req.headers['user-agent']
+        : null
+
+    await prisma.pushSubscription.upsert({
+      where: { endpoint },
+      create: {
+        userId: req.userId!,
+        endpoint,
+        p256dh: keys.p256dh,
+        auth: keys.auth,
+        userAgent,
+      },
+      update: {
+        userId: req.userId!,
+        p256dh: keys.p256dh,
+        auth: keys.auth,
+        userAgent,
+      },
+    })
+
+    res.json({ message: 'Подписка сохранена' });
+  } catch (error) {
+    console.error('Push subscribe error:', error);
+    res.status(500).json({ error: 'Ошибка при сохранении подписки' });
+  }
+});
+
+// Отписаться от Web Push
+router.post('/push/unsubscribe', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const { endpoint } = req.body as { endpoint?: string };
+    if (!endpoint) {
+      return res.status(400).json({ error: 'Укажите endpoint подписки' });
+    }
+
+    await prisma.pushSubscription.deleteMany({
+      where: {
+        endpoint,
+        userId: req.userId!,
+      },
+    });
+
+    res.json({ message: 'Подписка удалена' });
+  } catch (error) {
+    console.error('Push unsubscribe error:', error);
+    res.status(500).json({ error: 'Ошибка при отписке' });
   }
 });
 

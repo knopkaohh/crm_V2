@@ -3,12 +3,20 @@
 import { useState, useEffect } from 'react'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
-import { Bell, Save, CheckCircle } from 'lucide-react'
+import { Bell, Save, Smartphone } from 'lucide-react'
+import {
+  hasActivePushSubscription,
+  isPushSupported,
+  subscribeToWebPush,
+  unsubscribeFromWebPush,
+} from '@/lib/web-push'
 import { useToast } from '@/components/ToastProvider'
 
 interface NotificationSettings {
   enabled: boolean
   desktop: boolean
+  push?: boolean
+  pushConfigured?: boolean
   task: {
     assigned: boolean
     completed: boolean
@@ -36,10 +44,20 @@ export default function NotificationSettingsPage() {
   const [settings, setSettings] = useState<NotificationSettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [pushSubscribed, setPushSubscribed] = useState(false)
+  const [pushLoading, setPushLoading] = useState(false)
 
   useEffect(() => {
     loadSettings()
   }, [])
+
+  useEffect(() => {
+    if (!settings?.push) {
+      setPushSubscribed(false)
+      return
+    }
+    hasActivePushSubscription().then(setPushSubscribed)
+  }, [settings?.push])
 
   const loadSettings = async () => {
     try {
@@ -98,6 +116,68 @@ export default function NotificationSettingsPage() {
     }
 
     setSettings(newSettings)
+  }
+
+  const handleEnablePushOnDevice = async () => {
+    if (!settings) return
+    setPushLoading(true)
+    try {
+      const result = await subscribeToWebPush()
+      if (result.ok) {
+        setPushSubscribed(true)
+        const next = { ...settings, push: true, enabled: true }
+        setSettings(next)
+        await api.put('/notifications/settings', next)
+        window.dispatchEvent(new CustomEvent('notification-settings-updated'))
+        showToast({
+          title: 'Готово',
+          message: 'Push-уведомления включены на этом устройстве',
+          type: 'success',
+        })
+      } else if (result.reason === 'denied') {
+        showToast({
+          title: 'Доступ запрещён',
+          message:
+            'Разрешите уведомления в настройках браузера или телефона',
+          type: 'warning',
+        })
+      } else if (result.reason === 'not_configured') {
+        showToast({
+          title: 'Не настроено',
+          message: 'На сервере ещё не заданы VAPID-ключи для push',
+          type: 'error',
+        })
+      } else {
+        showToast({
+          title: 'Ошибка',
+          message: 'Не удалось подключить push на этом устройстве',
+          type: 'error',
+        })
+      }
+    } finally {
+      setPushLoading(false)
+    }
+  }
+
+  const handleDisablePushOnDevice = async () => {
+    setPushLoading(true)
+    try {
+      await unsubscribeFromWebPush()
+      setPushSubscribed(false)
+      if (settings) {
+        const next = { ...settings, push: false }
+        setSettings(next)
+        await api.put('/notifications/settings', next)
+        window.dispatchEvent(new CustomEvent('notification-settings-updated'))
+      }
+      showToast({
+        title: 'Отключено',
+        message: 'Push на этом устройстве отключён',
+        type: 'info',
+      })
+    } finally {
+      setPushLoading(false)
+    }
   }
 
   if (loading) {
@@ -182,6 +262,88 @@ export default function NotificationSettingsPage() {
               />
             </label>
           </div>
+        </div>
+
+        {/* Push на телефон / PWA */}
+        <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-2 flex items-center gap-2">
+            <Smartphone className="h-5 w-5 text-primary-600" />
+            Уведомления на телефон (Push)
+          </h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Системные уведомления в шторке, даже когда CRM свёрнута. На iPhone:
+            добавьте CRM на главный экран (PWA), затем включите push.
+          </p>
+
+          {!isPushSupported() ? (
+            <p className="text-sm text-amber-700 bg-amber-50 rounded-lg px-4 py-3">
+              Ваш браузер не поддерживает Web Push. Попробуйте Chrome на Android
+              или Safari после установки на экран «Домой».
+            </p>
+          ) : settings.pushConfigured === false ? (
+            <p className="text-sm text-amber-700 bg-amber-50 rounded-lg px-4 py-3">
+              Push ещё не настроен на сервере (нужны VAPID-ключи в .env).
+            </p>
+          ) : (
+            <div className="space-y-4">
+              <label className="flex items-center justify-between cursor-pointer">
+                <div>
+                  <span className="font-medium text-gray-900">
+                    Push-уведомления
+                  </span>
+                  <p className="text-sm text-gray-500">
+                    Получать события CRM в шторке уведомлений
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings.push)}
+                  onChange={async (e) => {
+                    const enabled = e.target.checked
+                    updateSetting('push', enabled)
+                    if (!enabled) {
+                      await handleDisablePushOnDevice()
+                    }
+                  }}
+                  disabled={!settings.enabled}
+                  className="w-5 h-5 text-primary-600 rounded focus:ring-primary-500 disabled:opacity-50"
+                />
+              </label>
+
+              {settings.push && settings.enabled && (
+                <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-gray-100">
+                  {pushSubscribed ? (
+                    <span className="text-sm text-green-700 bg-green-50 px-3 py-1.5 rounded-full">
+                      Подписка на этом устройстве активна
+                    </span>
+                  ) : (
+                    <span className="text-sm text-gray-600">
+                      Нужно разрешить уведомления на этом устройстве
+                    </span>
+                  )}
+                  {!pushSubscribed ? (
+                    <button
+                      type="button"
+                      onClick={handleEnablePushOnDevice}
+                      disabled={pushLoading}
+                      className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50"
+                    >
+                      {pushLoading ? 'Подключение…' : 'Включить на этом устройстве'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleDisablePushOnDevice}
+                      disabled={pushLoading}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Отключить на устройстве
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Уведомления о задачах */}

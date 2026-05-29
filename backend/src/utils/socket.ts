@@ -1,6 +1,7 @@
 import { io } from '../server';
 import { prisma } from './prisma';
 import { sendTelegramToUsers } from './telegram';
+import { sendWebPushToUser } from './web-push';
 import { UserRole } from '@prisma/client';
 
 export const sendNotification = async (
@@ -23,6 +24,13 @@ export const sendNotification = async (
 
   // Отправить через Socket.io
   io.to(`user-${userId}`).emit('notification', notification);
+
+  void sendWebPushToUser(userId, {
+    title,
+    message,
+    link,
+    type,
+  }).catch((err) => console.error('[WebPush] send error:', err));
 
   return notification;
 };

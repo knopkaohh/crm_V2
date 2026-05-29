@@ -18,6 +18,7 @@
     "migrate:direct": "node direct-sql-migration.js",
     "migrate:sql": "node apply-migration-prisma.js",
     "create-user": "tsx src/utils/create-user.ts",
+    "generate-vapid": "tsx scripts/generate-vapid-keys.ts",
     "create-admin": "tsx src/utils/create-admin.ts",
     "create-multiple-users": "tsx src/utils/create-multiple-users.ts",
     "update-user-role": "tsx src/utils/update-user-role.ts",
@@ -46,6 +47,7 @@
     "pdfkit": "^0.14.0",
     "pizzip": "^3.2.0",
     "socket.io": "^4.6.1",
+    "web-push": "^3.6.7",
     "xlsx": "^0.18.5",
     "zod": "^3.22.4"
   },
@@ -58,6 +60,7 @@
     "@types/node": "^20.10.5",
     "@types/nodemailer": "^6.4.14",
     "@types/pizzip": "^3.0.5",
+    "@types/web-push": "^3.6.4",
     "prisma": "^5.7.1",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
