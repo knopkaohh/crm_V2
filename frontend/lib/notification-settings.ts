@@ -19,6 +19,7 @@ export type NotificationSettings = {
     created: boolean
     statusChanged: boolean
     converted: boolean
+    callDue: boolean
   }
   general: {
     system: boolean
@@ -45,6 +46,7 @@ const DEFAULTS: NotificationSettings = {
     created: true,
     statusChanged: true,
     converted: true,
+    callDue: true,
   },
   general: {
     system: true,

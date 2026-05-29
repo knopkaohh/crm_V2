@@ -1,6 +1,10 @@
 import express from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { sendNotification, broadcastLeadUpdate, broadcastOrderUpdate } from '../utils/socket';
+import {
+  isLeadContactDueTodayOrOverdue,
+  sendLeadCallDueNotification,
+} from '../utils/lead-call-notifications';
 import { prisma } from '../utils/prisma';
 import { generateOrderNumber } from '../utils/order-utils';
 import { canViewAllLeads, canDeleteLead, canAccessLeadByManager } from '../utils/leads-access';
@@ -292,6 +296,19 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       );
     }
 
+    if (
+      lead.managerId &&
+      lead.nextContactDate &&
+      isLeadContactDueTodayOrOverdue(lead.nextContactDate)
+    ) {
+      await sendLeadCallDueNotification({
+        leadId: lead.id,
+        managerId: lead.managerId,
+        clientName: lead.client.name,
+        description: lead.description,
+      });
+    }
+
     broadcastLeadUpdate(lead.id, lead);
 
     res.status(201).json(lead);
@@ -387,6 +404,29 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
         'lead',
         `/leads/${lead.id}`
       );
+    }
+
+    const nextContact =
+      lead.nextContactDate ?? existingLead.nextContactDate;
+    const contactDateChanged =
+      nextContactDate !== undefined &&
+      (existingLead.nextContactDate?.getTime() !==
+        lead.nextContactDate?.getTime() ||
+        (!existingLead.nextContactDate && lead.nextContactDate));
+
+    if (
+      lead.managerId &&
+      nextContact &&
+      isLeadContactDueTodayOrOverdue(nextContact) &&
+      (contactDateChanged ||
+        (managerId !== undefined && managerId !== existingLead.managerId))
+    ) {
+      await sendLeadCallDueNotification({
+        leadId: lead.id,
+        managerId: lead.managerId,
+        clientName: lead.client.name,
+        description: lead.description,
+      });
     }
 
     broadcastLeadUpdate(lead.id, lead);

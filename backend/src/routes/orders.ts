@@ -9,9 +9,13 @@ import { notifyAllUsersAboutNewOrder } from '../utils/telegram';
 import { canAccessLeadByManager } from '../utils/leads-access';
 import { parseNotificationSettings } from '../utils/notification-settings';
 import {
+  formatDesignInDevelopmentNotification,
   formatNewOrderNotification,
+  formatOrderReadyNotification,
   NEW_ORDER_PUSH_OPTIONS,
+  orderEnteredDesignDevelopment,
 } from '../utils/order-notifications';
+import { getDesignTechnologistUserId } from '../utils/notification-users';
 
 const router = express.Router();
 
@@ -645,7 +649,11 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
 
     const existingOrder = await prisma.order.findUnique({
       where: { id },
-      include: { manager: true, client: true },
+      include: {
+        manager: true,
+        client: true,
+        creator: { select: { firstName: true, lastName: true } },
+      },
     });
 
     if (!existingOrder) {
@@ -723,17 +731,85 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
       );
     }
 
+    const nextStatus =
+      status !== undefined ? status : existingOrder.status;
+    const nextDesignStage =
+      designStage !== undefined
+        ? designStage
+        : existingOrder.designStage ?? 'IN_DEVELOPMENT';
+
+    const enteredDesign = orderEnteredDesignDevelopment({
+      prevStatus: existingOrder.status,
+      prevDesignStage: existingOrder.designStage,
+      nextStatus,
+      nextDesignStage,
+    });
+
+    if (enteredDesign) {
+      const actor = await prisma.user.findUnique({
+        where: { id: req.userId! },
+        select: { firstName: true, lastName: true },
+      });
+      const { title, message } = formatDesignInDevelopmentNotification({
+        actorFirstName: actor?.firstName ?? existingOrder.creator.firstName,
+        actorLastName: actor?.lastName ?? existingOrder.creator.lastName,
+        orderNumber: existingOrder.orderNumber,
+      });
+      const technologistId = await getDesignTechnologistUserId();
+      if (technologistId) {
+        const techUser = await prisma.user.findUnique({
+          where: { id: technologistId },
+          select: { notificationSettings: true, isActive: true },
+        });
+        const techSettings = parseNotificationSettings(
+          techUser?.notificationSettings
+        );
+        if (
+          techUser?.isActive &&
+          techSettings.enabled !== false &&
+          techSettings.order.statusChanged !== false
+        ) {
+          await sendNotification(
+            technologistId,
+            title,
+            message,
+            'order',
+            `/orders/${existingOrder.id}`
+          );
+        }
+      }
+    }
+
     // Если заказ готов или доставлен
-    if (status === 'ORDER_READY') {
-      updateData.deliveredAt = null; // Сброс, т.к. еще не доставлен
-      // Уведомление менеджеру
-      await sendNotification(
-        existingOrder.managerId,
-        'Заказ готов',
-        `Заказ ${existingOrder.orderNumber} готов к отгрузке`,
-        'order',
-        `/orders/${existingOrder.id}`
+    if (status === 'ORDER_READY' && existingOrder.status !== 'ORDER_READY') {
+      updateData.deliveredAt = null;
+      const managerUser = await prisma.user.findUnique({
+        where: { id: existingOrder.managerId },
+        select: { notificationSettings: true, isActive: true },
+      });
+      const managerSettings = parseNotificationSettings(
+        managerUser?.notificationSettings
       );
+      if (
+        managerUser?.isActive &&
+        managerSettings.enabled !== false &&
+        managerSettings.order.ready !== false
+      ) {
+        const brand =
+          existingOrder.client.company?.trim() ||
+          existingOrder.client.name;
+        const { title, message } = formatOrderReadyNotification({
+          orderNumber: existingOrder.orderNumber,
+          brand,
+        });
+        await sendNotification(
+          existingOrder.managerId,
+          title,
+          message,
+          'order',
+          `/orders/${existingOrder.id}`
+        );
+      }
     } else if (status === 'ORDER_DELIVERED') {
       updateData.deliveredAt = new Date();
       await sendNotification(

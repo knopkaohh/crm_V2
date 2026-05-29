@@ -485,6 +485,21 @@ export default function NotificationSettingsPage() {
             </label>
             <label className="flex items-center justify-between cursor-pointer">
               <div>
+                <span className="font-medium text-gray-900">Нужно позвонить клиенту</span>
+                <p className="text-sm text-gray-500">
+                  Контакт на сегодня или просрочен — только ответственному менеджеру
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.lead.callDue}
+                onChange={(e) => updateSetting('lead.callDue', e.target.checked)}
+                disabled={!settings.enabled}
+                className="w-5 h-5 text-primary-600 rounded focus:ring-primary-500 disabled:opacity-50"
+              />
+            </label>
+            <label className="flex items-center justify-between cursor-pointer">
+              <div>
                 <span className="font-medium text-gray-900">Лид переведен в заказ</span>
                 <p className="text-sm text-gray-500">Когда лид конвертируется в заказ</p>
               </div>
