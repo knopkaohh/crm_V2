@@ -10,34 +10,12 @@ import {
   subscribeToWebPush,
   unsubscribeFromWebPush,
 } from '@/lib/web-push'
+import {
+  normalizeNotificationSettings,
+  settingsForApiSave,
+  type NotificationSettings,
+} from '@/lib/notification-settings'
 import { useToast } from '@/components/ToastProvider'
-
-interface NotificationSettings {
-  enabled: boolean
-  desktop: boolean
-  push?: boolean
-  pushConfigured?: boolean
-  task: {
-    assigned: boolean
-    completed: boolean
-    dueSoon: boolean
-    overdue: boolean
-  }
-  order: {
-    created: boolean
-    statusChanged: boolean
-    ready: boolean
-    delivered: boolean
-  }
-  lead: {
-    created: boolean
-    statusChanged: boolean
-    converted: boolean
-  }
-  general: {
-    system: boolean
-  }
-}
 
 export default function NotificationSettingsPage() {
   const { showToast } = useToast()
@@ -46,23 +24,32 @@ export default function NotificationSettingsPage() {
   const [saving, setSaving] = useState(false)
   const [pushSubscribed, setPushSubscribed] = useState(false)
   const [pushLoading, setPushLoading] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  const [pushSupported, setPushSupported] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+    setPushSupported(isPushSupported())
+  }, [])
 
   useEffect(() => {
     loadSettings()
   }, [])
 
   useEffect(() => {
-    if (!settings?.push) {
+    if (!settings?.push || !mounted) {
       setPushSubscribed(false)
       return
     }
-    hasActivePushSubscription().then(setPushSubscribed)
-  }, [settings?.push])
+    hasActivePushSubscription()
+      .then(setPushSubscribed)
+      .catch(() => setPushSubscribed(false))
+  }, [settings?.push, mounted])
 
   const loadSettings = async () => {
     try {
       const response = await api.get('/notifications/settings')
-      setSettings(response.data)
+      setSettings(normalizeNotificationSettings(response.data))
     } catch (error) {
       console.error('Failed to load settings:', error)
       showToast({
@@ -80,7 +67,7 @@ export default function NotificationSettingsPage() {
 
     setSaving(true)
     try {
-      await api.put('/notifications/settings', settings)
+      await api.put('/notifications/settings', settingsForApiSave(settings))
       showToast({
         title: 'Успешно',
         message: 'Настройки уведомлений сохранены',
@@ -127,7 +114,7 @@ export default function NotificationSettingsPage() {
         setPushSubscribed(true)
         const next = { ...settings, push: true, enabled: true }
         setSettings(next)
-        await api.put('/notifications/settings', next)
+        await api.put('/notifications/settings', settingsForApiSave(next))
         window.dispatchEvent(new CustomEvent('notification-settings-updated'))
         showToast({
           title: 'Готово',
@@ -167,7 +154,7 @@ export default function NotificationSettingsPage() {
       if (settings) {
         const next = { ...settings, push: false }
         setSettings(next)
-        await api.put('/notifications/settings', next)
+        await api.put('/notifications/settings', settingsForApiSave(next))
         window.dispatchEvent(new CustomEvent('notification-settings-updated'))
       }
       showToast({
@@ -275,7 +262,9 @@ export default function NotificationSettingsPage() {
             добавьте CRM на главный экран (PWA), затем включите push.
           </p>
 
-          {!isPushSupported() ? (
+          {!mounted ? (
+            <p className="text-sm text-gray-500">Проверка поддержки push…</p>
+          ) : !pushSupported ? (
             <p className="text-sm text-amber-700 bg-amber-50 rounded-lg px-4 py-3">
               Ваш браузер не поддерживает Web Push. Попробуйте Chrome на Android
               или Safari после установки на экран «Домой».

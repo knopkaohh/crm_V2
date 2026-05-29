@@ -12,12 +12,18 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 }
 
 export function isPushSupported(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    'serviceWorker' in navigator &&
-    'PushManager' in window &&
-    'Notification' in window
-  )
+  if (typeof window === 'undefined') {
+    return false
+  }
+  try {
+    return (
+      'serviceWorker' in navigator &&
+      'PushManager' in window &&
+      'Notification' in window
+    )
+  } catch {
+    return false
+  }
 }
 
 export async function getServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {
@@ -42,65 +48,81 @@ export async function subscribeToWebPush(): Promise<{
     return { ok: false, reason: 'unsupported' }
   }
 
-  let publicKey: string
   try {
-    const response = await api.get('/notifications/push/vapid-public-key')
-    publicKey = response.data.publicKey
-  } catch {
-    return { ok: false, reason: 'not_configured' }
+    let publicKey: string
+    try {
+      const response = await api.get('/notifications/push/vapid-public-key')
+      publicKey = response.data.publicKey
+      if (!publicKey || typeof publicKey !== 'string') {
+        return { ok: false, reason: 'not_configured' }
+      }
+    } catch {
+      return { ok: false, reason: 'not_configured' }
+    }
+
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') {
+      return { ok: false, reason: 'denied' }
+    }
+
+    const registration = await getServiceWorkerRegistration()
+    if (!registration?.pushManager) {
+      return { ok: false, reason: 'no_sw' }
+    }
+
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    })
+
+    const json = subscription.toJSON()
+    if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
+      return { ok: false, reason: 'invalid_subscription' }
+    }
+
+    await api.post('/notifications/push/subscribe', {
+      endpoint: json.endpoint,
+      keys: {
+        p256dh: json.keys.p256dh,
+        auth: json.keys.auth,
+      },
+    })
+
+    return { ok: true }
+  } catch (error) {
+    console.error('[WebPush] subscribe failed:', error)
+    return { ok: false, reason: 'error' }
   }
-
-  const permission = await Notification.requestPermission()
-  if (permission !== 'granted') {
-    return { ok: false, reason: 'denied' }
-  }
-
-  const registration = await getServiceWorkerRegistration()
-  if (!registration?.pushManager) {
-    return { ok: false, reason: 'no_sw' }
-  }
-
-  const subscription = await registration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(publicKey),
-  })
-
-  const json = subscription.toJSON()
-  if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
-    return { ok: false, reason: 'invalid_subscription' }
-  }
-
-  await api.post('/notifications/push/subscribe', {
-    endpoint: json.endpoint,
-    keys: {
-      p256dh: json.keys.p256dh,
-      auth: json.keys.auth,
-    },
-  })
-
-  return { ok: true }
 }
 
 export async function unsubscribeFromWebPush(): Promise<void> {
   if (!isPushSupported()) return
 
-  const registration = await navigator.serviceWorker.getRegistration('/')
-  const subscription = await registration?.pushManager?.getSubscription()
-  if (!subscription) return
-
-  const endpoint = subscription.endpoint
   try {
-    await api.post('/notifications/push/unsubscribe', { endpoint })
-  } catch (error) {
-    console.error('[WebPush] Unsubscribe API error:', error)
-  }
+    const registration = await navigator.serviceWorker.getRegistration('/')
+    const subscription = await registration?.pushManager?.getSubscription()
+    if (!subscription) return
 
-  await subscription.unsubscribe()
+    const endpoint = subscription.endpoint
+    try {
+      await api.post('/notifications/push/unsubscribe', { endpoint })
+    } catch (error) {
+      console.error('[WebPush] Unsubscribe API error:', error)
+    }
+
+    await subscription.unsubscribe()
+  } catch (error) {
+    console.error('[WebPush] unsubscribe failed:', error)
+  }
 }
 
 export async function hasActivePushSubscription(): Promise<boolean> {
   if (!isPushSupported()) return false
-  const registration = await navigator.serviceWorker.getRegistration('/')
-  const subscription = await registration?.pushManager?.getSubscription()
-  return Boolean(subscription)
+  try {
+    const registration = await navigator.serviceWorker.getRegistration('/')
+    const subscription = await registration?.pushManager?.getSubscription()
+    return Boolean(subscription)
+  } catch {
+    return false
+  }
 }

@@ -153,7 +153,7 @@ router.get('/settings', authenticate, async (req: AuthRequest, res) => {
 // Обновить настройки уведомлений пользователя
 router.put('/settings', authenticate, async (req: AuthRequest, res) => {
   try {
-    const settings = req.body;
+    const { pushConfigured: _readOnly, ...settings } = req.body as Record<string, unknown>;
 
     await prisma.user.update({
       where: { id: req.userId! },

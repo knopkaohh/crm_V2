@@ -6,11 +6,13 @@ import api from '@/lib/api'
 import {
   hasActivePushSubscription,
   isPushSupported,
-  subscribeToWebPush,
   unsubscribeFromWebPush,
 } from '@/lib/web-push'
 
-/** Поддерживает Web Push при включённой настройке push */
+/**
+ * Синхронизирует отписку, если push выключен в настройках.
+ * Подписка только вручную (кнопка в настройках) — без автозапроса разрешений на каждой странице.
+ */
 export function PushNotificationManager() {
   const syncingRef = useRef(false)
 
@@ -32,15 +34,6 @@ export function PushNotificationManager() {
           const hasSub = await hasActivePushSubscription()
           if (hasSub) {
             await unsubscribeFromWebPush()
-          }
-          return
-        }
-
-        const hasSub = await hasActivePushSubscription()
-        if (!hasSub) {
-          const result = await subscribeToWebPush()
-          if (!result.ok && result.reason === 'denied') {
-            console.warn('[WebPush] Permission denied by user')
           }
         }
       } catch (error) {
