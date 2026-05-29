@@ -1,4 +1,5 @@
 import express from 'express';
+import { Prisma } from '@prisma/client';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { parseNotificationSettings } from '../utils/notification-settings';
@@ -153,11 +154,13 @@ router.get('/settings', authenticate, async (req: AuthRequest, res) => {
 // Обновить настройки уведомлений пользователя
 router.put('/settings', authenticate, async (req: AuthRequest, res) => {
   try {
-    const { pushConfigured: _readOnly, ...settings } = req.body as Record<string, unknown>;
+    const settings = parseNotificationSettings(req.body);
 
     await prisma.user.update({
       where: { id: req.userId! },
-      data: { notificationSettings: settings },
+      data: {
+        notificationSettings: settings as Prisma.InputJsonValue,
+      },
     });
 
     res.json({ message: 'Настройки уведомлений обновлены', settings });
