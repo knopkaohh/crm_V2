@@ -31,6 +31,28 @@ const getValidatedPeriod = (raw: unknown) => {
   return raw;
 };
 
+/** Диапазон календарного месяца YYYY-MM (UTC-нейтрально через локальные компоненты даты сервера) */
+const getMonthRangeFromPeriod = (rawPeriod: unknown) => {
+  const now = new Date();
+  const validated = getValidatedPeriod(rawPeriod);
+  let year = now.getFullYear();
+  let monthIndex = now.getMonth();
+
+  if (validated) {
+    const [y, m] = validated.split('-').map(Number);
+    year = y;
+    monthIndex = m - 1;
+  }
+
+  const period = validated ?? `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+  const monthStart = new Date(year, monthIndex, 1);
+  const nextMonthStart = new Date(year, monthIndex + 1, 1);
+  const isCurrentCalendarMonth =
+    year === now.getFullYear() && monthIndex === now.getMonth();
+
+  return { period, monthStart, nextMonthStart, isCurrentCalendarMonth };
+};
+
 // Получить метрики для дашборда
 router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
   try {
@@ -38,8 +60,8 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
     const whereCreator = {};
     const whereAssignee = {};
     const now = new Date();
-    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const { period, monthStart, nextMonthStart, isCurrentCalendarMonth } =
+      getMonthRangeFromPeriod(req.query.period);
 
     // Оптимизация: выполняем все запросы параллельно
     const today = new Date(now);
@@ -99,7 +121,7 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
         where: {
           ...whereManager,
           createdAt: {
-            gte: currentMonthStart,
+            gte: monthStart,
             lt: nextMonthStart,
           },
         },
@@ -108,7 +130,7 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
         where: {
           ...whereManager,
           createdAt: {
-            gte: currentMonthStart,
+            gte: monthStart,
             lt: nextMonthStart,
           },
         },
@@ -145,7 +167,7 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
           order: {
             ...whereManager,
             createdAt: {
-              gte: currentMonthStart,
+              gte: monthStart,
               lt: nextMonthStart,
             },
           },
@@ -158,7 +180,7 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
         where: {
           ...whereManager,
           createdAt: {
-            gte: currentMonthStart,
+            gte: monthStart,
             lt: nextMonthStart,
           },
         },
@@ -170,7 +192,7 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
         where: {
           ...whereManager,
           createdAt: {
-            gte: currentMonthStart,
+            gte: monthStart,
             lt: nextMonthStart,
           },
         },
@@ -298,6 +320,8 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
     }));
 
     res.json({
+      period,
+      isCurrentCalendarMonth,
       leads: {
         total: totalLeads,
         new: newLeads,
@@ -321,8 +345,10 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
       currentMonth: {
         ordersTotal: currentMonthOrders,
         revenueTotal: Number(currentMonthOrderStats._sum.totalAmount || 0),
-        todayRevenue: Number(currentDayOrderStats._sum.totalAmount || 0),
-        todayOrdersCount: currentDayOrdersCount,
+        todayRevenue: isCurrentCalendarMonth
+          ? Number(currentDayOrderStats._sum.totalAmount || 0)
+          : 0,
+        todayOrdersCount: isCurrentCalendarMonth ? currentDayOrdersCount : 0,
         averageCheck: Number(currentMonthOrderStats._avg.totalAmount || 0),
         producedUnitsTotal: Number(currentMonthProducedUnits._sum.quantity || 0),
         leadsTotal: currentMonthLeads.length,

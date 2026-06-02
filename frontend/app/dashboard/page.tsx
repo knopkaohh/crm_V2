@@ -81,6 +81,15 @@ const getCurrentMonthInput = () => {
   return `${now.getFullYear()}-${month}`
 }
 
+const formatPeriodLabel = (period: string) => {
+  const [year, month] = period.split('-').map(Number)
+  if (!year || !month) return period
+  return new Date(year, month - 1, 1).toLocaleDateString('ru-RU', {
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
 /** Сравнение «Иван Петров» / «Петров Иван» для привязки строк таблицы к данным API и сохранения плана по managerId */
 function normalizePersonNameKey(name: string): string {
   return name
@@ -120,8 +129,27 @@ export default function DashboardPage() {
   const [draftPlans, setDraftPlans] = useState<Record<string, number>>({})
 
   useEffect(() => {
+    let cancelled = false
+
+    const loadDashboardData = async () => {
+      setLoading(true)
+      try {
+        const response = await api.get('/analytics/dashboard', {
+          params: { period: selectedPeriod },
+        })
+        if (!cancelled) setData(response.data)
+      } catch (error) {
+        console.error('Failed to load dashboard data:', error)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
     loadDashboardData()
-  }, [])
+    return () => {
+      cancelled = true
+    }
+  }, [selectedPeriod])
 
   useEffect(() => {
     loadPlansForPeriod(selectedPeriod)
@@ -219,16 +247,8 @@ export default function DashboardPage() {
     }
   }
 
-  const loadDashboardData = async () => {
-    try {
-      const response = await api.get('/analytics/dashboard')
-      setData(response.data)
-    } catch (error) {
-      console.error('Failed to load dashboard data:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const isCurrentMonth = selectedPeriod === getCurrentMonthInput()
+  const periodLabel = isCurrentMonth ? 'Текущий месяц' : formatPeriodLabel(selectedPeriod)
 
   const monthlyRevenue = useMemo(() => data?.currentMonth.revenueTotal ?? 0, [data?.currentMonth.revenueTotal])
   const todayRevenue = useMemo(() => data?.currentMonth.todayRevenue ?? 0, [data?.currentMonth.todayRevenue])
@@ -386,22 +406,28 @@ export default function DashboardPage() {
               />
             </label>
           </div>
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div
+            className={`mt-6 grid grid-cols-1 gap-3 ${isCurrentMonth ? 'md:grid-cols-3' : 'md:grid-cols-1'}`}
+          >
             <div className="rounded-xl border border-primary-200 bg-white px-4 py-3 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Текущий месяц</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">{periodLabel}</p>
               <p className="mt-1 text-sm text-gray-600">Общая выручка</p>
               <p className="mt-2 text-2xl font-bold text-gray-900">{formatMoney(monthlyRevenue)}</p>
             </div>
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-3 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Сегодня</p>
-              <p className="mt-1 text-sm text-gray-600">Выручка за день</p>
-              <p className="mt-2 text-2xl font-bold text-gray-900">{formatMoney(todayRevenue)}</p>
-            </div>
-            <div className="rounded-xl border border-blue-200 bg-blue-50/50 px-4 py-3 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Сегодня</p>
-              <p className="mt-1 text-sm text-gray-600">Количество заказов</p>
-              <p className="mt-2 text-2xl font-bold text-gray-900">{todayOrdersCount}</p>
-            </div>
+            {isCurrentMonth && (
+              <>
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-3 shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Сегодня</p>
+                  <p className="mt-1 text-sm text-gray-600">Выручка за день</p>
+                  <p className="mt-2 text-2xl font-bold text-gray-900">{formatMoney(todayRevenue)}</p>
+                </div>
+                <div className="rounded-xl border border-blue-200 bg-blue-50/50 px-4 py-3 shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Сегодня</p>
+                  <p className="mt-1 text-sm text-gray-600">Количество заказов</p>
+                  <p className="mt-2 text-2xl font-bold text-gray-900">{todayOrdersCount}</p>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
