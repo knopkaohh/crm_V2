@@ -1088,6 +1088,101 @@ router.put('/:orderId/items/:itemId', authenticate, async (req: AuthRequest, res
   }
 });
 
+const formatOrderDateRu = (date: Date) =>
+  date.toLocaleDateString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+
+const isSameCalendarDay = (a: Date, b: Date) =>
+  a.getFullYear() === b.getFullYear() &&
+  a.getMonth() === b.getMonth() &&
+  a.getDate() === b.getDate();
+
+/** Перенос даты оформления (createdAt) на сегодня — для учёта и статистики за текущий месяц */
+router.post('/:id/move-to-current-month', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+
+    const existingOrder = await prisma.order.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        orderNumber: true,
+        managerId: true,
+        createdAt: true,
+      },
+    });
+
+    if (!existingOrder) {
+      return res.status(404).json({ error: 'Заказ не найден' });
+    }
+
+    if (!canMutateOrder(req, existingOrder.managerId)) {
+      return res.status(403).json({ error: 'Недостаточно прав' });
+    }
+
+    const previousCreatedAt = new Date(existingOrder.createdAt);
+    const newCreatedAt = new Date();
+
+    if (isSameCalendarDay(previousCreatedAt, newCreatedAt)) {
+      return res.status(400).json({
+        error: 'Дата заказа уже совпадает с сегодняшней',
+      });
+    }
+
+    const actor = await prisma.user.findUnique({
+      where: { id: req.userId! },
+      select: { firstName: true, lastName: true },
+    });
+    const actorName = actor
+      ? `${actor.firstName} ${actor.lastName}`.trim()
+      : 'Пользователь';
+
+    const historyContent =
+      `[Учёт] Дата оформления перенесена в текущий месяц: ${formatOrderDateRu(previousCreatedAt)} → ${formatOrderDateRu(newCreatedAt)}. ` +
+      `Выполнил: ${actorName}`;
+
+    const order = await prisma.$transaction(async (tx) => {
+      const updated = await tx.order.update({
+        where: { id },
+        data: { createdAt: newCreatedAt },
+        include: {
+          client: {
+            select: { id: true, name: true, phone: true, company: true },
+          },
+          manager: {
+            select: { id: true, firstName: true, lastName: true },
+          },
+          items: true,
+        },
+      });
+
+      await tx.comment.create({
+        data: {
+          content: historyContent,
+          userId: req.userId!,
+          orderId: id,
+        },
+      });
+
+      return updated;
+    });
+
+    broadcastOrderUpdate(order.id, order);
+
+    res.json({
+      order,
+      previousCreatedAt: previousCreatedAt.toISOString(),
+      newCreatedAt: newCreatedAt.toISOString(),
+    });
+  } catch (error) {
+    console.error('Move order to current month error:', error);
+    res.status(500).json({ error: 'Ошибка при переносе даты заказа' });
+  }
+});
+
 // Добавить комментарий к заказу
 router.post('/:id/comments', authenticate, async (req: AuthRequest, res) => {
   try {

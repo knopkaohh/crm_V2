@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronRight,
   Package,
+  CalendarClock,
 } from 'lucide-react'
 
 const STATUS_OPTIONS = [
@@ -79,6 +80,18 @@ function formatDateRu(iso: string) {
   }).format(d)
 }
 
+function isSameCalendarDay(a: Date, b: Date) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  )
+}
+
+function formatMonthYearRu(date: Date) {
+  return new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' }).format(date)
+}
+
 export default function OrderAccountingPage() {
   const [orders, setOrders] = useState<AccountingOrder[]>([])
   const [loading, setLoading] = useState(true)
@@ -86,6 +99,7 @@ export default function OrderAccountingPage() {
   const [dateTo, setDateTo] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [statusSavingId, setStatusSavingId] = useState<string | null>(null)
+  const [moveSavingId, setMoveSavingId] = useState<string | null>(null)
 
   const loadOrders = useCallback(async () => {
     try {
@@ -131,6 +145,53 @@ export default function OrderAccountingPage() {
     })
     return { quantity, orderSum, paid }
   }, [filteredOrders])
+
+  const handleMoveToCurrentMonth = async (order: AccountingOrder) => {
+    const previousDate = new Date(order.createdAt)
+    const today = new Date()
+    if (isSameCalendarDay(previousDate, today)) {
+      alert('Дата заказа уже совпадает с сегодняшней.')
+      return
+    }
+
+    const orderLabel = order.orderNumber || order.id.slice(0, 8)
+    const confirmed = window.confirm(
+      `Перенести заказ ${orderLabel} в текущий месяц?\n\n` +
+        `Дата оформления: ${formatDateRu(order.createdAt)} → ${formatDateRu(today.toISOString())}\n\n` +
+        `Заказ будет учтён в статистике за ${formatMonthYearRu(today)}. ` +
+        `Из прошлых периодов выручка по этому заказу будет исключена.\n\n` +
+        `В истории заказа сохранится запись об изменении.`,
+    )
+    if (!confirmed) return
+
+    setMoveSavingId(order.id)
+    try {
+      const res = await api.post(`/orders/${order.id}/move-to-current-month`)
+      const updated = res.data?.order
+      const newCreatedAt =
+        typeof updated?.createdAt === 'string' ? updated.createdAt : today.toISOString()
+      setOrders((list) =>
+        list.map((o) =>
+          o.id === order.id
+            ? {
+                ...o,
+                createdAt: newCreatedAt,
+                ...(updated?.status ? { status: updated.status } : {}),
+              }
+            : o,
+        ),
+      )
+      alert(
+        `Заказ ${orderLabel} перенесён: ${formatDateRu(order.createdAt)} → ${formatDateRu(newCreatedAt)}.`,
+      )
+    } catch (e: unknown) {
+      console.error('Failed to move order to current month:', e)
+      const ax = e as { response?: { data?: { error?: string } } }
+      alert(ax.response?.data?.error || 'Не удалось перенести дату заказа. Попробуйте ещё раз.')
+    } finally {
+      setMoveSavingId(null)
+    }
+  }
 
   const handleStatusChange = async (order: AccountingOrder, nextStatus: string) => {
     if (nextStatus === order.status) return
@@ -397,7 +458,27 @@ export default function OrderAccountingPage() {
                                   </div>
                                 </div>
                               )}
-                              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {!isSameCalendarDay(new Date(order.createdAt), new Date()) && (
+                                    <button
+                                      type="button"
+                                      disabled={moveSavingId === order.id}
+                                      onClick={() => handleMoveToCurrentMonth(order)}
+                                      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-amber-900 bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-100 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-700 disabled:opacity-60 transition-colors"
+                                    >
+                                      <CalendarClock className="h-4 w-4 shrink-0" />
+                                      {moveSavingId === order.id
+                                        ? 'Перенос…'
+                                        : 'Перенести в текущий месяц'}
+                                    </button>
+                                  )}
+                                  {isSameCalendarDay(new Date(order.createdAt), new Date()) && (
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                      Дата оформления уже сегодняшняя
+                                    </span>
+                                  )}
+                                </div>
                                 <Link
                                   href={`/orders/${order.id}`}
                                   className="inline-flex items-center gap-2 text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline"
