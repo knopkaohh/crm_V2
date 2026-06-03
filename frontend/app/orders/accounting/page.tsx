@@ -12,7 +12,10 @@ import {
   ChevronRight,
   Package,
   CalendarClock,
+  Search,
+  UserRound,
 } from 'lucide-react'
+import { useDebounce } from '@/hooks/useDebounce'
 
 const STATUS_OPTIONS = [
   { value: 'NEW_ORDER', label: 'Новый заказ' },
@@ -62,6 +65,12 @@ interface AccountingOrder {
   items: OrderItem[]
 }
 
+interface ManagerOption {
+  id: string
+  firstName: string
+  lastName: string
+}
+
 function formatRub(n: number) {
   return new Intl.NumberFormat('ru-RU', {
     minimumFractionDigits: 2,
@@ -97,6 +106,10 @@ export default function OrderAccountingPage() {
   const [loading, setLoading] = useState(true)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const debouncedSearch = useDebounce(searchQuery, 300)
+  const [managerFilter, setManagerFilter] = useState('all')
+  const [managerOptions, setManagerOptions] = useState<ManagerOption[]>([])
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [statusSavingId, setStatusSavingId] = useState<string | null>(null)
   const [moveSavingId, setMoveSavingId] = useState<string | null>(null)
@@ -119,19 +132,66 @@ export default function OrderAccountingPage() {
     loadOrders()
   }, [loadOrders])
 
-  const filteredOrders = useMemo(() => {
-    if (!dateFrom && !dateTo) return orders
-    return orders.filter((o) => {
-      const d = new Date(o.createdAt)
-      if (dateFrom && d < new Date(dateFrom)) return false
-      if (dateTo) {
-        const toEnd = new Date(dateTo)
-        toEnd.setHours(23, 59, 59, 999)
-        if (d > toEnd) return false
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await api.get('/leads/managers', { headers: { 'X-Skip-Cache': '1' } })
+        const list = Array.isArray(res.data) ? res.data : []
+        setManagerOptions(
+          list.map((m: ManagerOption) => ({
+            id: m.id,
+            firstName: m.firstName,
+            lastName: m.lastName,
+          })),
+        )
+      } catch (e) {
+        console.error('Failed to load managers for accounting filter:', e)
       }
-      return true
-    })
-  }, [orders, dateFrom, dateTo])
+    })()
+  }, [])
+
+  const filteredOrders = useMemo(() => {
+    let list = orders
+
+    if (dateFrom || dateTo) {
+      list = list.filter((o) => {
+        const d = new Date(o.createdAt)
+        if (dateFrom && d < new Date(dateFrom)) return false
+        if (dateTo) {
+          const toEnd = new Date(dateTo)
+          toEnd.setHours(23, 59, 59, 999)
+          if (d > toEnd) return false
+        }
+        return true
+      })
+    }
+
+    if (managerFilter !== 'all') {
+      list = list.filter((o) => o.manager?.id === managerFilter)
+    }
+
+    const q = debouncedSearch.trim()
+    if (q) {
+      const qLower = q.toLowerCase()
+      list = list.filter((o) => {
+        const managerName = o.manager
+          ? `${o.manager.firstName} ${o.manager.lastName}`.trim().toLowerCase()
+          : ''
+        return (
+          (o.orderNumber || '').toLowerCase().includes(qLower) ||
+          (o.client?.name || '').toLowerCase().includes(qLower) ||
+          (o.client?.phone || '').includes(q) ||
+          (o.client?.company || '').toLowerCase().includes(qLower) ||
+          managerName.includes(qLower)
+        )
+      })
+    }
+
+    return list
+  }, [orders, dateFrom, dateTo, managerFilter, debouncedSearch])
+
+  const hasActiveFilters =
+    Boolean(dateFrom || dateTo || managerFilter !== 'all' || debouncedSearch.trim())
 
   const totals = useMemo(() => {
     let quantity = 0
@@ -215,6 +275,10 @@ export default function OrderAccountingPage() {
 
   const inputDateClass =
     'py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-primary-500 focus:border-transparent'
+  const inputSearchClass =
+    'w-full pl-10 pr-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent'
+  const selectFilterClass =
+    'w-full sm:w-auto min-w-[12rem] py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-primary-500 focus:border-transparent'
   const selectStatusClass =
     'w-full min-w-0 max-w-[7rem] py-1.5 px-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-60 truncate'
   const thClass =
@@ -266,6 +330,36 @@ export default function OrderAccountingPage() {
               <ExternalLink className="h-4 w-4" /> К заказам
             </Link>
           </div>
+        </div>
+
+        <div className="flex flex-col md:flex-row gap-3 flex-shrink-0 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-sm">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Поиск по номеру, клиенту, бренду, телефону, менеджеру…"
+              className={inputSearchClass}
+              aria-label="Поиск заказов"
+            />
+          </div>
+          <label className="flex items-center gap-2 shrink-0">
+            <UserRound className="h-4 w-4 text-gray-500 dark:text-gray-400 hidden sm:block" />
+            <select
+              value={managerFilter}
+              onChange={(e) => setManagerFilter(e.target.value)}
+              className={selectFilterClass}
+              aria-label="Фильтр по менеджеру"
+            >
+              <option value="all">Все пользователи</option>
+              {managerOptions.map((manager) => (
+                <option key={manager.id} value={manager.id}>
+                  {manager.firstName} {manager.lastName}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 flex-shrink-0">
@@ -498,7 +592,9 @@ export default function OrderAccountingPage() {
             </table>
             {filteredOrders.length === 0 && (
               <div className="py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
-                Нет заказов за выбранный период.
+                {hasActiveFilters
+                  ? 'Нет заказов по выбранным фильтрам.'
+                  : 'Нет заказов для отображения.'}
               </div>
             )}
           </div>
