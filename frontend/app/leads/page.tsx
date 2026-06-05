@@ -284,8 +284,6 @@ export default function LeadsPage() {
   const [managerOptions, setManagerOptions] = useState<LeadManagerOption[]>([])
   const [contactsSearchInput, setContactsSearchInput] = useState('')
   const [contactsSearchDebounced, setContactsSearchDebounced] = useState('')
-  const [reschedulingLeadId, setReschedulingLeadId] = useState<string | null>(null)
-
   const [showNewLeadForm, setShowNewLeadForm] = useState(false)
   const [clients, setClients] = useState<ClientOption[]>([])
   const [clientsLoading, setClientsLoading] = useState(false)
@@ -1158,24 +1156,6 @@ export default function LeadsPage() {
     }
   }
 
-  const handleQuickReschedule = async (lead: Lead, days: number) => {
-    setReschedulingLeadId(lead.id)
-    try {
-      const base = lead.nextContactDate ? new Date(lead.nextContactDate) : new Date()
-      const next = new Date(base)
-      next.setDate(next.getDate() + days)
-      await api.put(`/leads/${lead.id}`, {
-        nextContactDate: next.toISOString(),
-      })
-      await loadLeads({ showSpinner: false })
-    } catch (error) {
-      console.error('Failed to reschedule contact:', error)
-      alert('Не удалось перенести дату контакта.')
-    } finally {
-      setReschedulingLeadId(null)
-    }
-  }
-
   const LeadCard = ({
     lead,
     showDate = false,
@@ -1184,8 +1164,6 @@ export default function LeadsPage() {
     onNextContact,
     onCloseContact,
     onDeleteLead,
-    onQuickReschedule,
-    reschedulingLeadId,
     showDeleteButton,
     variant,
   }: {
@@ -1196,8 +1174,6 @@ export default function LeadsPage() {
     onNextContact: () => void
     onCloseContact: () => void
     onDeleteLead: () => void
-    onQuickReschedule: (days: number) => void
-    reschedulingLeadId: string | null
     showDeleteButton: boolean
     variant?: 'default' | 'compact'
   }) => {
@@ -1257,11 +1233,6 @@ export default function LeadsPage() {
       cardVariant === 'compact'
         ? 'inline-flex items-center gap-1.5 px-2 py-1 transition'
         : 'inline-flex items-center gap-1.5 px-2 py-1 transition'
-    const quickBtnClass =
-      cardVariant === 'compact'
-        ? 'inline-flex items-center gap-1 rounded-lg border border-amber-200/90 bg-amber-50/90 px-2 py-1 text-[11px] font-semibold text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60'
-        : 'inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60'
-    const isRescheduling = reschedulingLeadId === lead.id
     const topMetaClass =
       cardVariant === 'compact'
         ? 'flex flex-col items-end gap-1.5 text-right pt-4'
@@ -1360,48 +1331,6 @@ export default function LeadsPage() {
           ) : (
             <p className="text-sm text-gray-400">Цель контакта не указана</p>
           )}
-
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-              Перенос
-            </span>
-            <button
-              type="button"
-              className={quickBtnClass}
-              disabled={isRescheduling}
-              title="Сохранить время суток, дата +1 день"
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                onQuickReschedule(1)
-              }}
-            >
-              {isRescheduling ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Calendar className="h-3 w-3" />
-              )}
-              Завтра
-            </button>
-            <button
-              type="button"
-              className={quickBtnClass}
-              disabled={isRescheduling}
-              title="+7 дней от текущей даты контакта"
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                onQuickReschedule(7)
-              }}
-            >
-              {isRescheduling ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Calendar className="h-3 w-3" />
-              )}
-              +7 дн.
-            </button>
-          </div>
 
           <div className={actionsRowClass}>
             <button
@@ -1946,8 +1875,6 @@ export default function LeadsPage() {
                       key={lead.id}
                       lead={lead}
                       showDeleteButton={canHardDeleteLead(currentUser)}
-                      reschedulingLeadId={reschedulingLeadId}
-                      onQuickReschedule={(days) => handleQuickReschedule(lead, days)}
                       onOpenNotes={() => openLeadModal(lead, 'notes')}
                       onOpenOrder={() => openLeadModal(lead, 'order')}
                       onNextContact={() => openLeadModal(lead, 'nextContact')}
@@ -1989,8 +1916,6 @@ export default function LeadsPage() {
                       showDate
                       variant="compact"
                       showDeleteButton={canHardDeleteLead(currentUser)}
-                      reschedulingLeadId={reschedulingLeadId}
-                      onQuickReschedule={(days) => handleQuickReschedule(lead, days)}
                       onOpenNotes={() => openLeadModal(lead, 'notes')}
                       onOpenOrder={() => openLeadModal(lead, 'order')}
                       onNextContact={() => openLeadModal(lead, 'nextContact')}

@@ -5,7 +5,7 @@ import fs from 'fs';
 import { promises as fsPromises } from 'fs';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
-import { ProjectSaleOrderKind, ProjectSaleStage, UserRole } from '@prisma/client';
+import { ProjectSaleOrderKind, ProjectSaleStage } from '@prisma/client';
 
 const router = express.Router();
 
@@ -131,6 +131,10 @@ const PROJECT_SALES_MANAGER_SLOTS: {
     keys: ['никита царьков', 'царьков никита'],
     emails: ['hnikita@gmail.com'],
   },
+  {
+    sortOrder: 7,
+    keys: ['михаил чирков', 'чирков михаил'],
+  },
 ];
 
 function projectSalesManagerSortOrder(user: {
@@ -151,13 +155,19 @@ function projectSalesManagerSortOrder(user: {
   return null;
 }
 
-function filterAndSortProjectSalesManagers<
+function sortProjectSalesManagers<
   T extends { firstName: string; lastName: string; email: string },
 >(users: T[]): T[] {
   return users
     .map((u) => ({ u, order: projectSalesManagerSortOrder(u) }))
-    .filter((x): x is { u: T; order: number } => x.order !== null)
-    .sort((a, b) => a.order - b.order)
+    .sort((a, b) => {
+      if (a.order !== null && b.order !== null) return a.order - b.order;
+      if (a.order !== null) return -1;
+      if (b.order !== null) return 1;
+      const nameA = `${a.u.lastName} ${a.u.firstName}`.toLowerCase();
+      const nameB = `${b.u.lastName} ${b.u.firstName}`.toLowerCase();
+      return nameA.localeCompare(nameB, 'ru');
+    })
     .map((x) => x.u);
 }
 
@@ -174,34 +184,11 @@ const saleInclude = {
   },
 } as const;
 
-/** Менеджеры для выпадающих списков: только белый список (по email и ФИО), любая роль */
+/** Менеджеры для выпадающих списков: все активные пользователи CRM (известные — в начале списка) */
 router.get('/managers', authenticate, async (_req, res) => {
   try {
-    const knownEmails = PROJECT_SALES_MANAGER_SLOTS.flatMap((s) => s.emails ?? []);
-
     const users = await prisma.user.findMany({
-      where: {
-        isActive: true,
-        OR: [
-          ...(knownEmails.length > 0
-            ? [{ email: { in: knownEmails, mode: 'insensitive' as const } }]
-            : []),
-          {
-            role: {
-              in: [
-                UserRole.SALES_MANAGER,
-                UserRole.CLIENT_MANAGER,
-                UserRole.EXECUTIVE,
-                UserRole.ADMIN,
-                UserRole.TECHNOLOGIST,
-              ],
-            },
-          },
-          { secondaryRoles: { has: UserRole.SALES_MANAGER } },
-          { secondaryRoles: { has: UserRole.CLIENT_MANAGER } },
-          { secondaryRoles: { has: UserRole.EXECUTIVE } },
-        ],
-      },
+      where: { isActive: true },
       select: {
         id: true,
         firstName: true,
@@ -210,7 +197,7 @@ router.get('/managers', authenticate, async (_req, res) => {
         role: true,
       },
     });
-    res.json(filterAndSortProjectSalesManagers(users));
+    res.json(sortProjectSalesManagers(users));
   } catch (error) {
     console.error('project-sales managers error:', error);
     res.status(500).json({ error: 'Ошибка при загрузке менеджеров' });
@@ -598,13 +585,6 @@ router.post('/batch', authenticate, async (req: AuthRequest, res) => {
     });
     if (managers.length !== managerIds.length) {
       return res.status(400).json({ error: 'Указан неизвестный или неактивный менеджер' });
-    }
-    for (const u of managers) {
-      if (projectSalesManagerSortOrder(u) === null) {
-        return res.status(400).json({
-          error: `Менеджер ${u.firstName} ${u.lastName} не входит в список назначения проектных продаж`,
-        });
-      }
     }
 
     const created = await prisma.$transaction(async (tx) => {
