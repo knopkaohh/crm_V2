@@ -479,6 +479,10 @@ export default function OrderAccountingPage() {
                                     <dd className="text-gray-900 dark:text-gray-100">{order.client?.name ?? '—'}</dd>
                                   </div>
                                   <div className="flex gap-2">
+                                    <dt className="text-gray-500 dark:text-gray-400 w-40 shrink-0">Бренд</dt>
+                                    <dd className="text-gray-900 dark:text-gray-100">{brand}</dd>
+                                  </div>
+                                  <div className="flex gap-2">
                                     <dt className="text-gray-500 dark:text-gray-400 w-40 shrink-0">Телефон</dt>
                                     <dd className="text-gray-900 dark:text-gray-100">{order.client?.phone ?? '—'}</dd>
                                   </div>
