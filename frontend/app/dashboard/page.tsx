@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Layout from '@/components/Layout'
-import api from '@/lib/api'
+import api, { isRequestAborted } from '@/lib/api'
 import { CalendarRange } from 'lucide-react'
 
 interface DashboardData {
@@ -139,7 +139,9 @@ export default function DashboardPage() {
         })
         if (!cancelled) setData(response.data)
       } catch (error) {
-        console.error('Failed to load dashboard data:', error)
+        if (!isRequestAborted(error)) {
+          console.error('Failed to load dashboard data:', error)
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -170,7 +172,9 @@ export default function DashboardPage() {
       }, {})
       setPlansByPeriod((prev) => ({ ...prev, [period]: mapped }))
     } catch (error) {
-      console.error('Failed to load manager plans:', error)
+      if (!isRequestAborted(error)) {
+        console.error('Failed to load manager plans:', error)
+      }
       setPlansByPeriod((prev) => ({ ...prev, [period]: prev[period] ?? {} }))
     }
   }

@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react'
 import { io, Socket } from 'socket.io-client'
 import { useToast } from './ToastProvider'
 import { auth } from '@/lib/auth'
-import api from '@/lib/api'
+import api, { isRequestAborted } from '@/lib/api'
 import { getSocketBaseUrl } from '@/lib/url'
 
 export function NotificationListener() {
@@ -26,7 +26,9 @@ export function NotificationListener() {
         const response = await api.get('/notifications/settings')
         notificationSettingsRef.current = response.data
       } catch (error) {
-        console.error('Failed to load notification settings:', error)
+        if (!isRequestAborted(error)) {
+          console.error('Failed to load notification settings:', error)
+        }
         // Установить дефолтные настройки
         notificationSettingsRef.current = {
           enabled: true,
@@ -104,7 +106,9 @@ export function NotificationListener() {
 
         socketRef.current = newSocket
       } catch (error) {
-        console.error('Failed to initialize socket:', error)
+        if (!isRequestAborted(error)) {
+          console.error('Failed to initialize socket:', error)
+        }
         isInitializedRef.current = false
       }
     }
@@ -130,7 +134,9 @@ export function NotificationListener() {
           const response = await api.get('/notifications/settings')
           notificationSettingsRef.current = response.data
         } catch (error) {
-          console.error('Failed to reload notification settings:', error)
+          if (!isRequestAborted(error)) {
+            console.error('Failed to reload notification settings:', error)
+          }
         }
       }
       loadSettings()

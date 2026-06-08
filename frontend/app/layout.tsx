@@ -26,6 +26,9 @@ export const metadata: Metadata = {
     title: 'Birka CRM',
     statusBarStyle: 'default',
   },
+  other: {
+    'mobile-web-app-capable': 'yes',
+  },
 }
 
 export default function RootLayout({

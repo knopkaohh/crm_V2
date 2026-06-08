@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { auth } from '@/lib/auth'
-import api from '@/lib/api'
+import api, { isRequestAborted } from '@/lib/api'
 import {
   hasActivePushSubscription,
   isPushSupported,
@@ -20,11 +20,10 @@ export function PushNotificationManager() {
     const syncPushSubscription = async () => {
       if (syncingRef.current || !isPushSupported()) return
 
-      const user = await auth.getCurrentUser()
-      if (!user) return
-
       syncingRef.current = true
       try {
+        const user = await auth.getCurrentUser()
+        if (!user) return
         const response = await api.get('/notifications/settings')
         const settings = response.data
         const pushEnabled = settings?.enabled !== false && settings?.push === true
@@ -37,7 +36,9 @@ export function PushNotificationManager() {
           }
         }
       } catch (error) {
-        console.error('[WebPush] Sync failed:', error)
+        if (!isRequestAborted(error)) {
+          console.error('[WebPush] Sync failed:', error)
+        }
       } finally {
         syncingRef.current = false
       }

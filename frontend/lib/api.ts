@@ -1,8 +1,19 @@
-import axios, { AxiosRequestConfig } from 'axios'
+import axios, { AxiosError, AxiosRequestConfig } from 'axios'
 import { apiCache, generateCacheKey } from './cache'
 import { getApiBaseUrl } from './url'
 
-const api = axios.create()
+const API_TIMEOUT_MS = 90_000
+const RETRYABLE_CODES = new Set(['ECONNABORTED', 'ERR_NETWORK', 'ETIMEDOUT'])
+
+/** Запрос оборван браузером (фоновая вкладка, смена страницы, нестабильная сеть) */
+export function isRequestAborted(error: unknown): boolean {
+  if (!axios.isAxiosError(error)) return false
+  return error.code === 'ECONNABORTED' || error.message === 'Request aborted'
+}
+
+const api = axios.create({
+  timeout: API_TIMEOUT_MS,
+})
 
 // baseURL на каждый запрос — после загрузки в браузере попадает на https://текущий-домен/api
 api.interceptors.request.use((config) => {
@@ -58,7 +69,7 @@ api.interceptors.response.use(
     
     return response;
   },
-  (error) => {
+  async (error) => {
     // Обрабатываем кэшированные данные
     if (error.__cached) {
       return Promise.resolve({
@@ -69,9 +80,23 @@ api.interceptors.response.use(
         config: error.config,
       });
     }
+
+    const axiosError = error as AxiosError & { config?: AxiosRequestConfig & { __retry?: boolean } }
+    const config = axiosError.config
+
+    // Одна повторная попытка для GET при обрыве на мобильной сети
+    if (
+      config &&
+      !config.__retry &&
+      (config.method === 'get' || !config.method) &&
+      RETRYABLE_CODES.has(axiosError.code ?? '')
+    ) {
+      config.__retry = true
+      return api.request(config)
+    }
     
     // Обработка ошибок авторизации
-    if (error.response?.status === 401) {
+    if (axiosError.response?.status === 401) {
       localStorage.removeItem('token')
       localStorage.removeItem('user')
       apiCache.clear(); // Очищаем кэш при выходе
