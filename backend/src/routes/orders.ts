@@ -40,9 +40,10 @@ async function recalcOrderTotalAmount(orderId: string) {
 // Получить все заказы
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { status, managerId, clientId, search, page = '1', limit = '100' } = req.query;
+    const { status, managerId, clientId, search, page = '1', limit = '100', forAccounting } = req.query;
     const pageNum = parseInt(page as string, 10);
-    const limitNum = Math.min(parseInt(limit as string, 10) || 100, 200); // Максимум 200
+    const maxLimit = forAccounting === 'true' || forAccounting === '1' ? 500 : 200;
+    const limitNum = Math.min(parseInt(limit as string, 10) || 100, maxLimit);
     const skip = (pageNum - 1) * limitNum;
 
     const where: any = {};

@@ -117,9 +117,25 @@ export default function OrderAccountingPage() {
   const loadOrders = useCallback(async () => {
     try {
       setLoading(true)
-      const res = await api.get('/orders', { params: { limit: 500 } })
-      const data = res.data?.data ?? res.data ?? []
-      setOrders(Array.isArray(data) ? data : [])
+      const PAGE_SIZE = 200
+      let page = 1
+      let allOrders: AccountingOrder[] = []
+      let totalPages = 1
+
+      do {
+        const res = await api.get('/orders', {
+          params: { page, limit: PAGE_SIZE, forAccounting: '1' },
+          headers: { 'X-Skip-Cache': 'true' },
+        })
+        const batch = res.data?.data ?? res.data ?? []
+        if (Array.isArray(batch)) {
+          allOrders = allOrders.concat(batch)
+        }
+        totalPages = Number(res.data?.pagination?.totalPages ?? 1)
+        page += 1
+      } while (page <= totalPages)
+
+      setOrders(allOrders)
     } catch (e) {
       console.error('Failed to load orders for accounting:', e)
       setOrders([])
@@ -304,7 +320,15 @@ export default function OrderAccountingPage() {
               <FileSpreadsheet className="h-8 w-8 text-primary-600" />
               <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Учёт заказов</h1>
             </div>
-            <p className="text-gray-600 dark:text-gray-300 mt-1 ml-10">Сводная таблица по заказам CRM</p>
+            <p className="text-gray-600 dark:text-gray-300 mt-1 ml-10">
+              Сводная таблица по заказам CRM
+              {!loading && orders.length > 0 && (
+                <span className="text-gray-500 dark:text-gray-400">
+                  {' '}
+                  · в базе {orders.length.toLocaleString('ru-RU')} заказов
+                </span>
+              )}
+            </p>
           </div>
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2 rounded-2xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 shadow-sm">
