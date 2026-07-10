@@ -1,6 +1,6 @@
 import express from 'express';
 import { Prisma } from '@prisma/client';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import { sendNotification, broadcastOrderUpdate, broadcastLeadUpdate } from '../utils/socket';
 import { generateInvoicePDF } from '../utils/generate-invoice';
 import { prisma } from '../utils/prisma';
@@ -1218,17 +1218,14 @@ router.post('/:id/comments', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// Удалить заказ
-router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
+// Удалить заказ (только администратор)
+router.delete('/:id', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
 
     const existingOrder = await prisma.order.findUnique({
       where: { id },
-      select: {
-        id: true,
-        managerId: true,
-      },
+      select: { id: true },
     });
 
     if (!existingOrder) {

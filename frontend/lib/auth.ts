@@ -26,6 +26,19 @@ export const auth = {
     return response.data
   },
 
+  getCachedUser: (): User | null => {
+    if (typeof window === 'undefined') return null
+    try {
+      const raw = localStorage.getItem('user')
+      if (!raw) return null
+      return JSON.parse(raw) as User
+    } catch {
+      return null
+    }
+  },
+
+  isAdmin: (user: User | null | undefined): boolean => user?.role === 'ADMIN',
+
   logout: () => {
     localStorage.removeItem('token')
     localStorage.removeItem('user')

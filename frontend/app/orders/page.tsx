@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
+import { auth, type User } from '@/lib/auth'
 import { Plus, Search, Package, Trash2, FileText, CheckCircle2, Clock3 } from 'lucide-react'
 import Link from 'next/link'
 import { useDebounce } from '@/hooks/useDebounce'
@@ -90,6 +91,11 @@ export default function OrdersPage() {
     type: 'MAX' | 'TELEGRAM'
   } | null>(null)
   const [designChatUrlInput, setDesignChatUrlInput] = useState('')
+  const [currentUser, setCurrentUser] = useState<User | null>(null)
+
+  useEffect(() => {
+    void auth.getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null))
+  }, [])
 
   const loadOrders = useCallback(async () => {
     try {
@@ -756,29 +762,30 @@ export default function OrdersPage() {
                         </div>
                       )}
                       
-                      <div className="flex justify-end mt-2">
-                        <button
-                          className="text-red-600 hover:text-red-700 text-xs inline-flex items-center gap-1"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            if (confirm('Вы уверены, что хотите удалить этот заказ?')) {
-                              // Try DELETE first
-                              api.delete(`/orders/${order.id}`)
-                                .then(() => {
-                                  setOrders((prev) => prev.filter((o) => o.id !== order.id))
-                                })
-                                .catch((err) => {
-                                  const msg = err?.response?.data?.error || err?.message || 'Не удалось удалить заказ'
-                                  alert(msg)
-                                })
-                            }
-                          }}
-                          title="Удалить заказ"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Удалить
-                        </button>
-                      </div>
+                      {currentUser?.role === 'ADMIN' && (
+                        <div className="flex justify-end mt-2">
+                          <button
+                            className="text-red-600 hover:text-red-700 text-xs inline-flex items-center gap-1"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (confirm('Вы уверены, что хотите удалить этот заказ?')) {
+                                api.delete(`/orders/${order.id}`)
+                                  .then(() => {
+                                    setOrders((prev) => prev.filter((o) => o.id !== order.id))
+                                  })
+                                  .catch((err) => {
+                                    const msg = err?.response?.data?.error || err?.message || 'Не удалось удалить заказ'
+                                    alert(msg)
+                                  })
+                              }
+                            }}
+                            title="Удалить заказ"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Удалить
+                          </button>
+                        </div>
+                      )}
                     </div>
                     )
                   })}

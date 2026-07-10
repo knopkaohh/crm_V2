@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, Fragment } from 'react'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
+import { auth, type User } from '@/lib/auth'
 import Link from 'next/link'
 import {
   FileSpreadsheet,
@@ -14,6 +15,7 @@ import {
   CalendarClock,
   Search,
   UserRound,
+  Trash2,
 } from 'lucide-react'
 import { useDebounce } from '@/hooks/useDebounce'
 
@@ -113,6 +115,20 @@ export default function OrderAccountingPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [statusSavingId, setStatusSavingId] = useState<string | null>(null)
   const [moveSavingId, setMoveSavingId] = useState<string | null>(null)
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null)
+  const [currentUser, setCurrentUser] = useState<User | null>(() => auth.getCachedUser())
+
+  useEffect(() => {
+    void auth
+      .getCurrentUser()
+      .then((user) => {
+        setCurrentUser(user)
+        localStorage.setItem('user', JSON.stringify(user))
+      })
+      .catch(() => {
+        /* оставляем кэш из localStorage */
+      })
+  }, [])
 
   const loadOrders = useCallback(async () => {
     try {
@@ -266,6 +282,30 @@ export default function OrderAccountingPage() {
       alert(ax.response?.data?.error || 'Не удалось перенести дату заказа. Попробуйте ещё раз.')
     } finally {
       setMoveSavingId(null)
+    }
+  }
+
+  const handleDeleteOrder = async (order: AccountingOrder) => {
+    const orderLabel = order.orderNumber || order.id.slice(0, 8)
+    if (
+      !window.confirm(
+        `Удалить заказ ${orderLabel}?\n\nЭто действие нельзя отменить. Заказ будет удалён из CRM и учёта.`,
+      )
+    ) {
+      return
+    }
+
+    setDeletingOrderId(order.id)
+    try {
+      await api.delete(`/orders/${order.id}`)
+      setOrders((list) => list.filter((o) => o.id !== order.id))
+      if (expandedId === order.id) setExpandedId(null)
+    } catch (e: unknown) {
+      console.error('Failed to delete order:', e)
+      const ax = e as { response?: { data?: { error?: string } }; message?: string }
+      alert(ax.response?.data?.error || ax.message || 'Не удалось удалить заказ')
+    } finally {
+      setDeletingOrderId(null)
     }
   }
 
@@ -599,6 +639,21 @@ export default function OrderAccountingPage() {
                                     <span className="text-xs text-gray-500 dark:text-gray-400">
                                       Дата оформления уже сегодняшняя
                                     </span>
+                                  )}
+                                  {auth.isAdmin(currentUser) && (
+                                    <button
+                                      type="button"
+                                      disabled={deletingOrderId === order.id}
+                                      onClick={() => void handleDeleteOrder(order)}
+                                      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-200 dark:hover:bg-red-900/50 border border-red-200 dark:border-red-800 disabled:opacity-60 transition-colors"
+                                    >
+                                      {deletingOrderId === order.id ? (
+                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-600" />
+                                      ) : (
+                                        <Trash2 className="h-4 w-4 shrink-0" />
+                                      )}
+                                      {deletingOrderId === order.id ? 'Удаление…' : 'Удалить заказ'}
+                                    </button>
                                   )}
                                 </div>
                                 <Link

@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
+import { auth, type User } from '@/lib/auth'
 import { downloadProtectedFile } from '@/lib/downloadProtectedFile'
 import { openInvoicePdfPlaceholderTab, showInvoicePdfFromBlob } from '@/lib/openInvoicePdf'
 import { Edit2, Save, Trash2, X as XIcon, FileDown } from 'lucide-react'
@@ -163,6 +164,12 @@ export default function OrderDetailPage() {
   const [savingEdit, setSavingEdit] = useState(false)
   const [invoiceDownloading, setInvoiceDownloading] = useState(false)
   const [designStage, setDesignStage] = useState<'IN_DEVELOPMENT' | 'ON_APPROVAL'>('IN_DEVELOPMENT')
+  const [currentUser, setCurrentUser] = useState<User | null>(null)
+  const [deletingOrder, setDeletingOrder] = useState(false)
+
+  useEffect(() => {
+    void auth.getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null))
+  }, [])
 
   useEffect(() => {
     if (orderId) {
@@ -218,6 +225,24 @@ export default function OrderDetailPage() {
       console.error('Failed to take design:', e)
       alert('Не удалось взять заказ в работу')
       await loadOrder()
+    }
+  }
+
+  const handleDeleteOrder = async () => {
+    if (!order || deletingOrder) return
+    const label = order.orderNumber || order.id
+    if (!confirm(`Удалить заказ ${label}? Это действие нельзя отменить.`)) return
+
+    setDeletingOrder(true)
+    try {
+      await api.delete(`/orders/${order.id}`)
+      router.push('/orders')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string }
+      const msg = err?.response?.data?.error || err?.message || 'Не удалось удалить заказ'
+      alert(msg)
+    } finally {
+      setDeletingOrder(false)
     }
   }
 
@@ -662,6 +687,21 @@ export default function OrderDetailPage() {
                   <Edit2 className="h-4 w-4 shrink-0" />
                   Редактировать
                 </button>
+                {currentUser?.role === 'ADMIN' && (
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteOrder()}
+                    disabled={deletingOrder}
+                    className="px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {deletingOrder ? (
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-600" />
+                    ) : (
+                      <Trash2 className="h-4 w-4 shrink-0" />
+                    )}
+                    Удалить
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => router.back()}
