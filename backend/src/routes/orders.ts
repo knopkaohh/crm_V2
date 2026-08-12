@@ -101,6 +101,7 @@ router.get('/', authenticate, async (req, res) => {
           paymentType: true,
           prepayment: true,
           postpayment: true,
+          paymentStatus: true,
         designTakenAt: true,
         designTakenBy: true,
         designStage: true,
@@ -296,6 +297,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
         paymentType: true,
         prepayment: true,
         postpayment: true,
+        paymentStatus: true,
         designTakenAt: true,
         designTakenBy: true,
         designStage: true,
@@ -646,6 +648,8 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
       designChatType,
       items: itemsPayload,
       orderNumber: bodyOrderNumber,
+      paymentStatus,
+      prepayment,
     } = req.body;
 
     const existingOrder = await prisma.order.findUnique({
@@ -670,6 +674,58 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
     if (source !== undefined) updateData.source = source;
     if (designStage !== undefined) updateData.designStage = designStage;
     if (designNeedsRevision !== undefined) updateData.designNeedsRevision = Boolean(designNeedsRevision);
+
+    const orderTotalAmount = Number(existingOrder.totalAmount);
+
+    if (paymentStatus !== undefined) {
+      const allowed = ['UNPAID', 'PARTIAL', 'PAID'];
+      const next = String(paymentStatus).toUpperCase();
+      if (!allowed.includes(next)) {
+        return res.status(400).json({ error: 'Недопустимый статус оплаты' });
+      }
+      updateData.paymentStatus = next;
+      if (next === 'UNPAID') {
+        updateData.prepayment = null;
+      } else if (next === 'PAID') {
+        updateData.prepayment = orderTotalAmount;
+      } else if (next === 'PARTIAL' && prepayment === undefined) {
+        const existingPaid = Number(existingOrder.prepayment ?? 0);
+        if (existingPaid <= 0 || existingPaid >= orderTotalAmount) {
+          return res.status(400).json({ error: 'Укажите сумму частичной оплаты' });
+        }
+      }
+    }
+
+    if (prepayment !== undefined) {
+      if (prepayment === null || prepayment === '') {
+        updateData.prepayment = null;
+      } else {
+        const amount = parseFloat(String(prepayment));
+        if (Number.isNaN(amount) || amount < 0) {
+          return res.status(400).json({ error: 'Некорректная сумма оплаты' });
+        }
+        if (amount > orderTotalAmount) {
+          return res.status(400).json({ error: 'Сумма оплаты не может превышать сумму заказа' });
+        }
+        updateData.prepayment = amount;
+        const effectiveStatus =
+          updateData.paymentStatus ??
+          (paymentStatus !== undefined
+            ? String(paymentStatus).toUpperCase()
+            : (existingOrder as { paymentStatus?: string }).paymentStatus ?? 'UNPAID');
+        if (effectiveStatus === 'PARTIAL') {
+          if (amount <= 0) {
+            return res.status(400).json({ error: 'Укажите сумму частичной оплаты больше нуля' });
+          }
+          if (amount >= orderTotalAmount) {
+            return res.status(400).json({
+              error: 'При полной оплате используйте статус «Заказ оплачен»',
+            });
+          }
+          updateData.paymentStatus = 'PARTIAL';
+        }
+      }
+    }
 
     if (designChatUrl !== undefined && designChatType !== undefined) {
       const rawUrl = String(designChatUrl ?? '').trim();

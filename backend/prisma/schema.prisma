@@ -246,8 +246,9 @@ model Order {
   notes         String?
   source        String?     // Источник заказа (Avito, Сайт и т.д.)
   paymentType   String?     // Форма оплаты: TRANSFER, INVOICE, CASH, PARTIAL
-  prepayment    Decimal?    // Предоплата (для дробной оплаты)
+  prepayment    Decimal?    // Сумма частичной оплаты (учёт заказов)
   postpayment   Decimal?    // Постоплата (для дробной оплаты)
+  paymentStatus String      @default("UNPAID") // UNPAID | PARTIAL | PAID
   designTakenAt DateTime?   // Когда взят в работу дизайнером
   designTakenBy String?     // Кто взял в работу (User ID)
   designStage   String      @default("IN_DEVELOPMENT") // Стадия внутри DESIGN_APPROVAL

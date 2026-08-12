@@ -35,6 +35,14 @@ const PAYMENT_LABELS: Record<string, string> = {
   PARTIAL: 'Дробная оплата',
 }
 
+type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'PAID'
+
+const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  UNPAID: 'Не оплачен',
+  PARTIAL: 'Частичная оплата',
+  PAID: 'Оплачен',
+}
+
 interface OrderItem {
   id: string
   name: string
@@ -52,6 +60,7 @@ interface AccountingOrder {
   paymentType?: string | null
   prepayment?: number | null
   postpayment?: number | null
+  paymentStatus?: PaymentStatus | string | null
   createdAt: string
   client: {
     id: string
@@ -103,6 +112,31 @@ function formatMonthYearRu(date: Date) {
   return new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' }).format(date)
 }
 
+function resolvePaymentStatus(order: AccountingOrder): PaymentStatus {
+  const raw = order.paymentStatus?.toUpperCase()
+  if (raw === 'PAID' || raw === 'PARTIAL' || raw === 'UNPAID') return raw
+  return 'UNPAID'
+}
+
+function paymentRowIndicatorClass(status: PaymentStatus) {
+  switch (status) {
+    case 'PAID':
+      return 'border-r-4 border-r-green-600'
+    case 'PARTIAL':
+      return 'border-r-4 border-r-yellow-400'
+    default:
+      return 'border-r-4 border-r-red-500'
+  }
+}
+
+function paidAmountForOrder(order: AccountingOrder): number {
+  const status = resolvePaymentStatus(order)
+  const total = Number(order.totalAmount ?? 0)
+  if (status === 'PAID') return total
+  if (status === 'PARTIAL') return Number(order.prepayment ?? 0)
+  return 0
+}
+
 export default function OrderAccountingPage() {
   const [orders, setOrders] = useState<AccountingOrder[]>([])
   const [loading, setLoading] = useState(true)
@@ -116,6 +150,9 @@ export default function OrderAccountingPage() {
   const [statusSavingId, setStatusSavingId] = useState<string | null>(null)
   const [moveSavingId, setMoveSavingId] = useState<string | null>(null)
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null)
+  const [paymentSavingId, setPaymentSavingId] = useState<string | null>(null)
+  const [partialInputOrderId, setPartialInputOrderId] = useState<string | null>(null)
+  const [partialDraft, setPartialDraft] = useState('')
   const [currentUser, setCurrentUser] = useState<User | null>(() => auth.getCachedUser())
 
   useEffect(() => {
@@ -233,10 +270,73 @@ export default function OrderAccountingPage() {
       const q = o.items?.reduce((s, i) => s + i.quantity, 0) ?? 0
       quantity += q
       orderSum += Number(o.totalAmount ?? 0)
-      paid += Number(o.prepayment ?? 0)
+      paid += paidAmountForOrder(o)
     })
     return { quantity, orderSum, paid }
   }, [filteredOrders])
+
+  const patchOrderInList = (orderId: string, patch: Partial<AccountingOrder>) => {
+    setOrders((list) => list.map((o) => (o.id === orderId ? { ...o, ...patch } : o)))
+  }
+
+  const handleMarkPaid = async (order: AccountingOrder) => {
+    setPaymentSavingId(order.id)
+    setPartialInputOrderId(null)
+    try {
+      const res = await api.put(`/orders/${order.id}`, { paymentStatus: 'PAID' })
+      const updated = res.data
+      patchOrderInList(order.id, {
+        paymentStatus: 'PAID',
+        prepayment: Number(updated?.prepayment ?? order.totalAmount),
+      })
+    } catch (e: unknown) {
+      console.error('Failed to mark order paid:', e)
+      const ax = e as { response?: { data?: { error?: string } } }
+      alert(ax.response?.data?.error || 'Не удалось сохранить статус оплаты')
+    } finally {
+      setPaymentSavingId(null)
+    }
+  }
+
+  const openPartialPaymentInput = (order: AccountingOrder) => {
+    setPartialInputOrderId(order.id)
+    const current = Number(order.prepayment ?? 0)
+    setPartialDraft(current > 0 ? String(current) : '')
+  }
+
+  const handleSavePartialPayment = async (order: AccountingOrder) => {
+    const total = Number(order.totalAmount ?? 0)
+    const amount = parseFloat(partialDraft.replace(',', '.'))
+    if (Number.isNaN(amount) || amount <= 0) {
+      alert('Укажите сумму частичной оплаты больше нуля')
+      return
+    }
+    if (amount >= total) {
+      alert('Сумма частичной оплаты должна быть меньше суммы заказа. Для полной оплаты нажмите «Заказ оплачен».')
+      return
+    }
+
+    setPaymentSavingId(order.id)
+    try {
+      const res = await api.put(`/orders/${order.id}`, {
+        paymentStatus: 'PARTIAL',
+        prepayment: amount,
+      })
+      const updated = res.data
+      patchOrderInList(order.id, {
+        paymentStatus: 'PARTIAL',
+        prepayment: Number(updated?.prepayment ?? amount),
+      })
+      setPartialInputOrderId(null)
+      setPartialDraft('')
+    } catch (e: unknown) {
+      console.error('Failed to save partial payment:', e)
+      const ax = e as { response?: { data?: { error?: string } } }
+      alert(ax.response?.data?.error || 'Не удалось сохранить частичную оплату')
+    } finally {
+      setPaymentSavingId(null)
+    }
+  }
 
   const handleMoveToCurrentMonth = async (order: AccountingOrder) => {
     const previousDate = new Date(order.createdAt)
@@ -369,6 +469,20 @@ export default function OrderAccountingPage() {
                 </span>
               )}
             </p>
+            <div className="flex flex-wrap items-center gap-3 mt-2 ml-10 text-xs text-gray-600">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-4 w-1 rounded-full bg-red-500" aria-hidden />
+                Не оплачен
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-4 w-1 rounded-full bg-yellow-400" aria-hidden />
+                Частичная оплата
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-4 w-1 rounded-full bg-green-600" aria-hidden />
+                Оплачен
+              </span>
+            </div>
           </div>
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2 rounded-2xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 shadow-sm">
@@ -462,24 +576,41 @@ export default function OrderAccountingPage() {
               <tbody>
                 {filteredOrders.map((order) => {
                   const open = expandedId === order.id
+                  const paymentStatus = resolvePaymentStatus(order)
+                  const rowIndicator = paymentRowIndicatorClass(paymentStatus)
                   const managerName = order.manager
                     ? `${order.manager.firstName} ${order.manager.lastName}`.trim()
                     : '—'
                   const brand = order.client?.company?.trim() || '—'
-                  const prepayment = Number(order.prepayment ?? 0)
-                  const remaining = Math.max(0, Number(order.totalAmount) - prepayment)
+                  const orderTotal = Number(order.totalAmount ?? 0)
+                  const paidAmount = paidAmountForOrder(order)
+                  const remaining = Math.max(0, orderTotal - paidAmount)
                   const paymentLabel = order.paymentType
                     ? PAYMENT_LABELS[order.paymentType] ?? order.paymentType
                     : '—'
                   const knownStatus = STATUS_OPTIONS.some((o) => o.value === order.status)
+                  const isPartialFormOpen = partialInputOrderId === order.id
+                  const isPaymentSaving = paymentSavingId === order.id
 
                   return (
                     <Fragment key={order.id}>
-                      <tr className="border-b border-gray-100 dark:border-gray-700/80 hover:bg-gray-50/80 dark:hover:bg-gray-700/40 transition-colors">
+                      <tr
+                        className={`border-b border-gray-100 dark:border-gray-700/80 hover:bg-gray-50/80 dark:hover:bg-gray-700/40 transition-colors ${rowIndicator}`}
+                      >
                         <td className="py-2 px-2 align-middle">
                           <button
                             type="button"
-                            onClick={() => setExpandedId(open ? null : order.id)}
+                            onClick={() => {
+                              if (open) {
+                                setExpandedId(null)
+                                if (partialInputOrderId === order.id) {
+                                  setPartialInputOrderId(null)
+                                  setPartialDraft('')
+                                }
+                              } else {
+                                setExpandedId(order.id)
+                              }
+                            }}
                             className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                             aria-expanded={open}
                             title={open ? 'Свернуть' : 'Подробности заказа'}
@@ -523,13 +654,15 @@ export default function OrderAccountingPage() {
                         <td className={`${tdClass} text-gray-700 dark:text-gray-200`}>{managerName}</td>
                         <td className={tdClass}>{brand}</td>
                         <td className={`${tdClass} text-right font-semibold tabular-nums`}>
-                          {formatRub(Number(order.totalAmount ?? 0))}
+                          {formatRub(orderTotal)}
                         </td>
                       </tr>
                       {open && (
-                        <tr className="bg-gray-50/90 dark:bg-gray-900/50">
+                        <tr className={`bg-gray-50/90 dark:bg-gray-900/50 ${rowIndicator}`}>
                           <td colSpan={7} className="p-0 border-b border-gray-200 dark:border-gray-700">
                             <div className="p-4 sm:p-6 text-sm">
+                              <div className="flex flex-col xl:flex-row gap-6">
+                                <div className="flex-1 min-w-0">
                               <div className="flex flex-wrap items-center gap-2 mb-4">
                                 <Package className="h-4 w-4 text-primary-600 shrink-0" />
                                 <span className="font-semibold text-gray-900 dark:text-gray-100">
@@ -564,7 +697,7 @@ export default function OrderAccountingPage() {
                                 <dl className="space-y-2">
                                   <div className="flex gap-2">
                                     <dt className="text-gray-500 dark:text-gray-400 w-40 shrink-0">Предоплата</dt>
-                                    <dd className="tabular-nums">{formatRub(prepayment)}</dd>
+                                    <dd className="tabular-nums">{formatRub(paidAmount)}</dd>
                                   </div>
                                   {order.postpayment != null && (
                                     <div className="flex gap-2">
@@ -620,6 +753,71 @@ export default function OrderAccountingPage() {
                                   </div>
                                 </div>
                               )}
+                                </div>
+
+                                <div className="xl:w-72 shrink-0 rounded-2xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-4 shadow-sm">
+                                  <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+                                    Статус оплаты
+                                  </h4>
+                                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-3">
+                                    {PAYMENT_STATUS_LABELS[paymentStatus]}
+                                  </p>
+                                  <div className="flex flex-col gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={isPaymentSaving || paymentStatus === 'PAID'}
+                                      onClick={() => void handleMarkPaid(order)}
+                                      className="w-full px-3 py-2 rounded-lg text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 transition-colors"
+                                    >
+                                      {isPaymentSaving && !isPartialFormOpen ? 'Сохранение…' : 'Заказ оплачен'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isPaymentSaving}
+                                      onClick={() => openPartialPaymentInput(order)}
+                                      className="w-full px-3 py-2 rounded-lg text-sm font-medium text-amber-900 bg-yellow-100 hover:bg-yellow-200 border border-yellow-300 disabled:opacity-50 transition-colors"
+                                    >
+                                      Частичная оплата
+                                    </button>
+                                  </div>
+                                  {isPartialFormOpen && (
+                                    <div className="mt-3 space-y-2">
+                                      <label className="block text-xs text-gray-500 dark:text-gray-400">
+                                        Сумма оплаты, ₽
+                                      </label>
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        step="0.01"
+                                        value={partialDraft}
+                                        onChange={(e) => setPartialDraft(e.target.value)}
+                                        placeholder="5000"
+                                        className="w-full py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900"
+                                      />
+                                      <button
+                                        type="button"
+                                        disabled={isPaymentSaving}
+                                        onClick={() => void handleSavePartialPayment(order)}
+                                        className="w-full px-3 py-2 rounded-lg text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50 transition-colors"
+                                      >
+                                        {isPaymentSaving ? 'Сохранение…' : 'Сохранить сумму'}
+                                      </button>
+                                    </div>
+                                  )}
+                                  {paymentStatus === 'PARTIAL' && paidAmount > 0 && (
+                                    <p className="mt-3 text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+                                      Заказ {formatRub(orderTotal)} · оплачено {formatRub(paidAmount)} ·
+                                      осталось {formatRub(remaining)}
+                                    </p>
+                                  )}
+                                  {paymentStatus === 'PAID' && (
+                                    <p className="mt-3 text-xs text-green-700 dark:text-green-400">
+                                      Заказ полностью оплачен ({formatRub(orderTotal)})
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+
                               <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                                 <div className="flex flex-wrap items-center gap-2">
                                   {!isSameCalendarDay(new Date(order.createdAt), new Date()) && (
