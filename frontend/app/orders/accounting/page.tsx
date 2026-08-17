@@ -137,6 +137,15 @@ function paidAmountForOrder(order: AccountingOrder): number {
   return 0
 }
 
+function unpaidAmountForOrder(order: AccountingOrder): number {
+  const total = Number(order.totalAmount ?? 0)
+  return Math.max(0, total - paidAmountForOrder(order))
+}
+
+function isUnpaidOrder(order: AccountingOrder): boolean {
+  return resolvePaymentStatus(order) !== 'PAID'
+}
+
 export default function OrderAccountingPage() {
   const [orders, setOrders] = useState<AccountingOrder[]>([])
   const [loading, setLoading] = useState(true)
@@ -145,7 +154,7 @@ export default function OrderAccountingPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const debouncedSearch = useDebounce(searchQuery, 300)
   const [managerFilter, setManagerFilter] = useState('all')
-  const [managerOptions, setManagerOptions] = useState<ManagerOption[]>([])
+  const [unpaidOnlyFilter, setUnpaidOnlyFilter] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [statusSavingId, setStatusSavingId] = useState<string | null>(null)
   const [moveSavingId, setMoveSavingId] = useState<string | null>(null)
@@ -201,23 +210,26 @@ export default function OrderAccountingPage() {
     loadOrders()
   }, [loadOrders])
 
+  const managerOptions = useMemo(() => {
+    const map = new Map<string, ManagerOption>()
+    for (const order of orders) {
+      if (!order.manager?.id) continue
+      map.set(order.manager.id, {
+        id: order.manager.id,
+        firstName: order.manager.firstName,
+        lastName: order.manager.lastName,
+      })
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`, 'ru'),
+    )
+  }, [orders])
+
   useEffect(() => {
-    void (async () => {
-      try {
-        const res = await api.get('/leads/managers', { headers: { 'X-Skip-Cache': '1' } })
-        const list = Array.isArray(res.data) ? res.data : []
-        setManagerOptions(
-          list.map((m: ManagerOption) => ({
-            id: m.id,
-            firstName: m.firstName,
-            lastName: m.lastName,
-          })),
-        )
-      } catch (e) {
-        console.error('Failed to load managers for accounting filter:', e)
-      }
-    })()
-  }, [])
+    if (managerFilter !== 'all' && !managerOptions.some((m) => m.id === managerFilter)) {
+      setManagerFilter('all')
+    }
+  }, [managerFilter, managerOptions])
 
   const filteredOrders = useMemo(() => {
     let list = orders
@@ -239,6 +251,10 @@ export default function OrderAccountingPage() {
       list = list.filter((o) => o.manager?.id === managerFilter)
     }
 
+    if (unpaidOnlyFilter) {
+      list = list.filter(isUnpaidOrder)
+    }
+
     const q = debouncedSearch.trim()
     if (q) {
       const qLower = q.toLowerCase()
@@ -257,22 +273,25 @@ export default function OrderAccountingPage() {
     }
 
     return list
-  }, [orders, dateFrom, dateTo, managerFilter, debouncedSearch])
+  }, [orders, dateFrom, dateTo, managerFilter, unpaidOnlyFilter, debouncedSearch])
 
-  const hasActiveFilters =
-    Boolean(dateFrom || dateTo || managerFilter !== 'all' || debouncedSearch.trim())
+  const hasActiveFilters = Boolean(
+    dateFrom || dateTo || managerFilter !== 'all' || debouncedSearch.trim() || unpaidOnlyFilter,
+  )
 
   const totals = useMemo(() => {
     let quantity = 0
     let orderSum = 0
     let paid = 0
+    let unpaidSum = 0
     filteredOrders.forEach((o) => {
       const q = o.items?.reduce((s, i) => s + i.quantity, 0) ?? 0
       quantity += q
       orderSum += Number(o.totalAmount ?? 0)
       paid += paidAmountForOrder(o)
+      unpaidSum += unpaidAmountForOrder(o)
     })
-    return { quantity, orderSum, paid }
+    return { quantity, orderSum, paid, unpaidSum }
   }, [filteredOrders])
 
   const patchOrderInList = (orderId: string, patch: Partial<AccountingOrder>) => {
@@ -522,6 +541,18 @@ export default function OrderAccountingPage() {
               aria-label="Поиск заказов"
             />
           </div>
+          <button
+            type="button"
+            onClick={() => setUnpaidOnlyFilter((v) => !v)}
+            className={`shrink-0 px-4 py-2 rounded-xl text-sm font-medium border transition-colors ${
+              unpaidOnlyFilter
+                ? 'bg-red-50 text-red-700 border-red-300 hover:bg-red-100'
+                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+            aria-pressed={unpaidOnlyFilter}
+          >
+            Неоплаченные заказы
+          </button>
           <label className="flex items-center gap-2 shrink-0">
             <UserRound className="h-4 w-4 text-gray-500 dark:text-gray-400 hidden sm:block" />
             <select
@@ -544,17 +575,37 @@ export default function OrderAccountingPage() {
           {[
             { label: 'Итого ед.', value: totals.quantity.toLocaleString('ru-RU') },
             { label: 'Сумма заказов', value: formatRub(totals.orderSum) },
-            { label: 'Внесено', value: formatRub(totals.paid) },
+            ...(unpaidOnlyFilter
+              ? [{ label: 'Сумма неоплаченных', value: formatRub(totals.unpaidSum) }]
+              : [{ label: 'Внесено', value: formatRub(totals.paid) }]),
             { label: 'Заказов', value: String(filteredOrders.length) },
           ].map((card) => (
             <div
               key={card.label}
-              className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3 shadow-sm"
+              className={`rounded-2xl border px-4 py-3 shadow-sm ${
+                card.label === 'Сумма неоплаченных'
+                  ? 'border-red-200 bg-red-50/80 dark:border-red-800 dark:bg-red-900/20'
+                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
+              }`}
             >
-              <span className="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+              <span
+                className={`text-[10px] font-medium uppercase tracking-wide ${
+                  card.label === 'Сумма неоплаченных'
+                    ? 'text-red-600 dark:text-red-400'
+                    : 'text-gray-500 dark:text-gray-400'
+                }`}
+              >
                 {card.label}
               </span>
-              <div className="text-lg font-semibold text-gray-900 dark:text-gray-100 mt-0.5">{card.value}</div>
+              <div
+                className={`text-lg font-semibold mt-0.5 ${
+                  card.label === 'Сумма неоплаченных'
+                    ? 'text-red-700 dark:text-red-300'
+                    : 'text-gray-900 dark:text-gray-100'
+                }`}
+              >
+                {card.value}
+              </div>
             </div>
           ))}
         </div>
@@ -874,7 +925,9 @@ export default function OrderAccountingPage() {
             {filteredOrders.length === 0 && (
               <div className="py-12 text-center text-gray-500 dark:text-gray-400 text-sm">
                 {hasActiveFilters
-                  ? 'Нет заказов по выбранным фильтрам.'
+                  ? unpaidOnlyFilter
+                    ? 'Нет неоплаченных заказов по выбранным фильтрам.'
+                    : 'Нет заказов по выбранным фильтрам.'
                   : 'Нет заказов для отображения.'}
               </div>
             )}
