@@ -81,3 +81,15 @@ export function todayDateInput() {
   const d = String(now.getDate()).padStart(2, '0')
   return `${now.getFullYear()}-${m}-${d}`
 }
+
+export function getPreviousBusinessDayDateInput(from = new Date()) {
+  const d = new Date(from)
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() - 1)
+  while (d.getDay() === 0 || d.getDay() === 6) {
+    d.setDate(d.getDate() - 1)
+  }
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}

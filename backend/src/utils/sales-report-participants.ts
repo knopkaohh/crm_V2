@@ -48,12 +48,15 @@ export function getPreviousBusinessDay(from: Date): Date {
   return d;
 }
 
-export function parseDateOnly(input: string): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input.trim());
-  if (!m) return null;
-  const year = Number(m[1]);
-  const month = Number(m[2]);
-  const day = Number(m[3]);
+/** YYYY-MM-DD из date input или ISO-строки */
+export function normalizeDateOnlyString(input: string): string | null {
+  const trimmed = input.trim();
+  const iso = /^(\d{4}-\d{2}-\d{2})/.exec(trimmed);
+  if (!iso) return null;
+  const parts = iso[1].split('-').map(Number);
+  const year = parts[0];
+  const month = parts[1];
+  const day = parts[2];
   const d = new Date(year, month - 1, day);
   if (
     d.getFullYear() !== year ||
@@ -62,7 +65,14 @@ export function parseDateOnly(input: string): Date | null {
   ) {
     return null;
   }
-  return d;
+  return iso[1];
+}
+
+export function parseDateOnly(input: string): Date | null {
+  const normalized = normalizeDateOnlyString(input);
+  if (!normalized) return null;
+  const [year, month, day] = normalized.split('-').map(Number);
+  return new Date(year, month - 1, day);
 }
 
 export function formatDateOnly(d: Date): string {

@@ -9,6 +9,7 @@ import {
   conversionPercent,
   canEditReportDate,
   formatDateOnly,
+  normalizeDateOnlyString,
   parseDateOnly,
   parsePeriodMonth,
 } from '../utils/sales-report-participants';
@@ -201,10 +202,11 @@ router.get('/day', authenticate, async (req: AuthRequest, res) => {
     const dateStr = req.query.date as string;
     const managerId = (req.query.managerId as string) || req.userId!;
 
-    const date = parseDateOnly(dateStr);
-    if (!date) {
+    const dateNorm = normalizeDateOnlyString(dateStr || '');
+    if (!dateNorm) {
       return res.status(400).json({ error: 'Укажите дату в формате YYYY-MM-DD' });
     }
+    const date = parseDateOnly(dateNorm)!;
 
     const participants = await loadParticipants();
     if (!participants.some((p) => p.id === managerId)) {
@@ -234,6 +236,7 @@ router.get('/day', authenticate, async (req: AuthRequest, res) => {
     res.json({
       date: dateStr,
       managerId,
+      exists: rows.length > 0,
       canEdit: canEditReportDate(req.userRole, date),
       entries,
     });
@@ -332,8 +335,8 @@ router.delete('/day', authenticate, requireRole('ADMIN'), async (req: AuthReques
       return res.status(400).json({ error: 'Укажите managerId' });
     }
 
-    const date = parseDateOnly(dateStr);
-    if (!date) {
+    const dateNorm = normalizeDateOnlyString(dateStr || '');
+    if (!dateNorm) {
       return res.status(400).json({ error: 'Укажите дату в формате YYYY-MM-DD' });
     }
 
@@ -342,8 +345,21 @@ router.delete('/day', authenticate, requireRole('ADMIN'), async (req: AuthReques
       return res.status(400).json({ error: 'Менеджер не участвует в отчёте' });
     }
 
+    const existing = await prisma.dailySalesReport.findMany({
+      where: { managerId },
+      select: { id: true, date: true },
+    });
+
+    const idsToDelete = existing
+      .filter((row) => formatDateOnly(row.date) === dateNorm)
+      .map((row) => row.id);
+
+    if (idsToDelete.length === 0) {
+      return res.status(404).json({ error: 'Отчёт за указанную дату не найден' });
+    }
+
     const result = await prisma.dailySalesReport.deleteMany({
-      where: { managerId, date },
+      where: { id: { in: idsToDelete } },
     });
 
     res.json({ success: true, deleted: result.count });

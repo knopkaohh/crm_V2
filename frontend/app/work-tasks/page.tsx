@@ -48,11 +48,19 @@ const priorityColors = [
   'bg-red-100 text-red-800 border-red-200',
 ]
 
+const statusCardStyles: Record<string, { border: string; bg: string }> = {
+  PENDING: { border: 'border-l-blue-400', bg: 'bg-blue-50/50' },
+  IN_PROGRESS: { border: 'border-l-yellow-400', bg: 'bg-yellow-50/50' },
+  COMPLETED: { border: 'border-l-green-500', bg: 'bg-green-50/50' },
+  CANCELLED: { border: 'border-l-red-500', bg: 'bg-red-50/50' },
+}
+
 const emptyForm = {
   title: '',
   description: '',
   priority: '1',
   dueDate: '',
+  assigneeId: '',
 }
 
 export default function WorkTasksPage() {
@@ -74,8 +82,25 @@ export default function WorkTasksPage() {
       setCurrentUser(u)
       setSelectedAssigneeId(u?.id ?? '')
     })
-    void api.get('/leads/managers').then((res) => setUsers(res.data ?? []))
   }, [])
+
+  useEffect(() => {
+    void api.get('/orders/managers').then((res) => {
+      const list: ManagerUser[] = res.data ?? []
+      if (currentUser && !list.some((u) => u.id === currentUser.id)) {
+        setUsers([
+          ...list,
+          {
+            id: currentUser.id,
+            firstName: currentUser.firstName,
+            lastName: currentUser.lastName,
+          },
+        ])
+      } else {
+        setUsers(list)
+      }
+    })
+  }, [currentUser])
 
   const canEditBoard = Boolean(currentUser && selectedAssigneeId === currentUser.id)
 
@@ -170,7 +195,10 @@ export default function WorkTasksPage() {
   }
 
   const openCreateModal = () => {
-    setFormData(emptyForm)
+    setFormData({
+      ...emptyForm,
+      assigneeId: currentUser?.id ?? selectedAssigneeId,
+    })
     setModalOpen(true)
   }
 
@@ -186,7 +214,7 @@ export default function WorkTasksPage() {
         title: formData.title.trim(),
         description: formData.description.trim() || undefined,
         priority: parseInt(formData.priority, 10) || 0,
-        assigneeId: selectedAssigneeId,
+        assigneeId: formData.assigneeId || currentUser?.id,
         dueDate: formData.dueDate || undefined,
       })
       setModalOpen(false)
@@ -302,6 +330,10 @@ export default function WorkTasksPage() {
                     ) : (
                       columnTasks.map((task) => {
                         const dueLabel = formatDueDate(task.dueDate)
+                        const cardStyle = statusCardStyles[status] ?? {
+                          border: 'border-l-gray-300',
+                          bg: 'bg-white',
+                        }
                         const isOverdue =
                           task.dueDate &&
                           task.status !== 'COMPLETED' &&
@@ -313,13 +345,7 @@ export default function WorkTasksPage() {
                             key={task.id}
                             draggable={canEditBoard}
                             onDragStart={(e) => handleDragStart(e, task.id)}
-                            className={`rounded-2xl border border-gray-200 p-3 shadow-sm hover:shadow-md transition-shadow bg-white border-l-4 ${
-                              task.priority >= 2
-                                ? 'border-l-red-500'
-                                : task.priority === 1
-                                  ? 'border-l-amber-500'
-                                  : 'border-l-gray-300'
-                            } ${canEditBoard ? 'cursor-move' : 'cursor-pointer'} ${
+                            className={`rounded-2xl border border-gray-200 p-3 shadow-sm hover:shadow-md transition-shadow border-l-4 ${cardStyle.border} ${cardStyle.bg} ${canEditBoard ? 'cursor-move' : 'cursor-pointer'} ${
                               draggedTask === task.id ? 'opacity-50' : ''
                             }`}
                             onClick={() => router.push(`/tasks/${task.id}`)}
@@ -403,6 +429,20 @@ export default function WorkTasksPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
                   placeholder="Дополнительная информация"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Исполнитель</label>
+                <select
+                  value={formData.assigneeId}
+                  onChange={(e) => setFormData({ ...formData, assigneeId: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm"
+                >
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.firstName} {u.lastName}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

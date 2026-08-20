@@ -187,6 +187,28 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
+// Менеджеры с заказами в CRM (для фильтров и назначения задач)
+router.get('/managers', authenticate, async (_req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        assignedOrders: { some: {} },
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+      },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+    });
+    res.json(users);
+  } catch (error) {
+    console.error('Get order managers error:', error);
+    res.status(500).json({ error: 'Ошибка при загрузке списка менеджеров' });
+  }
+});
+
 // Генерация PDF счета (выше /:id, чтобы не перехватывалось общим маршрутом)
 router.get('/:id/invoice', authenticate, async (req: AuthRequest, res) => {
   try {

@@ -11,6 +11,7 @@ import {
   formatDateRu,
   formatPeriodLabel,
   getCurrentMonthInput,
+  getPreviousBusinessDayDateInput,
   todayDateInput,
   type SalesReportChannelId,
 } from '@/lib/sales-report'
@@ -79,6 +80,8 @@ interface Participant {
 
 type ViewMode = 'all' | 'my'
 
+type ReportFormMode = 'fill-today' | 'today-done' | 'edit-today' | 'edit-previous'
+
 interface FormEntry {
   channel: SalesReportChannelId
   applications: string
@@ -111,6 +114,8 @@ export default function SalesReportPage() {
 
   const [reportModalOpen, setReportModalOpen] = useState(false)
   const [reportDate, setReportDate] = useState(todayDateInput())
+  const [reportFormMode, setReportFormMode] = useState<ReportFormMode>('fill-today')
+  const [todayReportExists, setTodayReportExists] = useState(false)
   const [formEntries, setFormEntries] = useState<FormEntry[]>(emptyFormEntries())
   const [formCanEdit, setFormCanEdit] = useState(true)
   const [savingReport, setSavingReport] = useState(false)
@@ -159,47 +164,51 @@ export default function SalesReportPage() {
     loadDashboard()
   }, [loadDashboard, viewMode, currentUser])
 
+  const applyEntriesFromResponse = (entries: Array<{ channel: string; applications?: number; interested?: number; orders?: number }>) => {
+    setFormEntries(
+      SALES_REPORT_CHANNELS.map((ch) => {
+        const row = entries.find((e) => e.channel === ch)
+        return {
+          channel: ch,
+          applications: String(row?.applications ?? 0),
+          interested: String(row?.interested ?? 0),
+          orders: String(row?.orders ?? 0),
+        }
+      }),
+    )
+  }
+
   const openReportModal = async () => {
-    const date = todayDateInput()
-    setReportDate(date)
+    const today = todayDateInput()
+    setReportDate(today)
     setReportModalOpen(true)
     try {
-      const res = await api.get('/sales-reports/day', { params: { date } })
+      const res = await api.get('/sales-reports/day', { params: { date: today } })
       const entries = res.data?.entries ?? []
+      const exists = Boolean(res.data?.exists)
+      setTodayReportExists(exists)
       setFormCanEdit(Boolean(res.data?.canEdit))
-      setFormEntries(
-        SALES_REPORT_CHANNELS.map((ch) => {
-          const row = entries.find((e: { channel: string }) => e.channel === ch)
-          return {
-            channel: ch,
-            applications: String(row?.applications ?? 0),
-            interested: String(row?.interested ?? 0),
-            orders: String(row?.orders ?? 0),
-          }
-        }),
-      )
+      setReportFormMode(exists ? 'today-done' : 'fill-today')
+      applyEntriesFromResponse(entries)
     } catch {
       setFormEntries(emptyFormEntries())
       setFormCanEdit(true)
+      setTodayReportExists(false)
+      setReportFormMode('fill-today')
     }
   }
 
-  const loadFormForDate = async (date: string) => {
+  const switchReportForm = async (date: string, mode: ReportFormMode) => {
+    setReportDate(date)
+    setReportFormMode(mode)
     try {
       const res = await api.get('/sales-reports/day', { params: { date } })
       const entries = res.data?.entries ?? []
       setFormCanEdit(Boolean(res.data?.canEdit))
-      setFormEntries(
-        SALES_REPORT_CHANNELS.map((ch) => {
-          const row = entries.find((e: { channel: string }) => e.channel === ch)
-          return {
-            channel: ch,
-            applications: String(row?.applications ?? 0),
-            interested: String(row?.interested ?? 0),
-            orders: String(row?.orders ?? 0),
-          }
-        }),
-      )
+      applyEntriesFromResponse(entries)
+      if (date === todayDateInput()) {
+        setTodayReportExists(Boolean(res.data?.exists))
+      }
     } catch {
       setFormCanEdit(false)
     }
@@ -215,6 +224,9 @@ export default function SalesReportPage() {
         orders: parseInt(e.orders, 10) || 0,
       }))
       await api.post('/sales-reports', { date: reportDate, entries })
+      if (reportDate === todayDateInput()) {
+        setTodayReportExists(true)
+      }
       setReportModalOpen(false)
       await loadDashboard()
     } catch (e: unknown) {
@@ -261,7 +273,15 @@ export default function SalesReportPage() {
     const dayKey = `${managerId}-${date}`
     setDeletingDayKey(dayKey)
     try {
-      await api.delete('/sales-reports/day', { params: { managerId, date } })
+      const normalizedDate = date.includes('T') ? date.split('T')[0] : date
+      const res = await api.delete('/sales-reports/day', {
+        params: { managerId, date: normalizedDate },
+        headers: { 'X-Skip-Cache': 'true' },
+      })
+      if (!res.data?.deleted) {
+        alert('Отчёт за указанную дату не найден')
+        return
+      }
       await loadDashboard()
     } catch (e: unknown) {
       const ax = e as { response?: { data?: { error?: string } } }
@@ -620,23 +640,45 @@ export default function SalesReportPage() {
               </button>
             </div>
             <div className="px-5 py-4 overflow-y-auto flex-1 space-y-4">
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700">Дата отчёта</span>
-                <input
-                  type="date"
-                  value={reportDate}
-                  onChange={(e) => {
-                    setReportDate(e.target.value)
-                    void loadFormForDate(e.target.value)
-                  }}
-                  className="mt-1 w-full py-2 px-3 border border-gray-300 rounded-xl text-sm"
-                />
-              </label>
-              {!formCanEdit && (
-                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                  Эту дату можно редактировать только администратору или руководителю
-                </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    void switchReportForm(getPreviousBusinessDayDateInput(), 'edit-previous')
+                  }
+                  className="px-3 py-2 text-sm font-medium border border-gray-300 rounded-xl hover:bg-gray-50 text-gray-700"
+                >
+                  Редактировать предыдущий отчёт
+                </button>
+                {todayReportExists && reportFormMode !== 'edit-today' && (
+                  <button
+                    type="button"
+                    onClick={() => void switchReportForm(todayDateInput(), 'edit-today')}
+                    className="px-3 py-2 text-sm font-medium border border-primary-300 rounded-xl hover:bg-primary-50 text-primary-700"
+                  >
+                    Редактировать сегодняшний отчёт
+                  </button>
+                )}
+              </div>
+
+              {reportFormMode === 'today-done' && (
+                <div className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 font-medium">
+                  Отчёт за сегодня заполнен
+                </div>
               )}
+
+              {reportFormMode !== 'today-done' && (
+                <>
+                  <p className="text-sm text-gray-600">
+                    {reportFormMode === 'edit-previous'
+                      ? `Редактирование отчёта: ${formatDateRu(reportDate)}`
+                      : `Отчёт за сегодня: ${formatDateRu(todayDateInput())}`}
+                  </p>
+                  {!formCanEdit && (
+                    <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                      Эту дату можно редактировать только администратору или руководителю
+                    </p>
+                  )}
               {SALES_REPORT_CHANNEL_GROUPS.map((group) => (
                 <div key={group.title}>
                   <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
@@ -701,6 +743,8 @@ export default function SalesReportPage() {
                   </div>
                 </div>
               ))}
+                </>
+              )}
             </div>
             <div className="px-5 py-4 border-t border-gray-100 flex justify-end gap-2">
               <button
@@ -708,16 +752,18 @@ export default function SalesReportPage() {
                 onClick={() => setReportModalOpen(false)}
                 className="px-4 py-2 text-sm border border-gray-300 rounded-xl hover:bg-gray-50"
               >
-                Отмена
+                {reportFormMode === 'today-done' ? 'Закрыть' : 'Отмена'}
               </button>
-              <button
-                type="button"
-                disabled={!formCanEdit || savingReport}
-                onClick={() => void handleSaveReport()}
-                className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-xl hover:bg-primary-700 disabled:opacity-50"
-              >
-                {savingReport ? 'Сохранение…' : 'Сохранить отчёт'}
-              </button>
+              {reportFormMode !== 'today-done' && (
+                <button
+                  type="button"
+                  disabled={!formCanEdit || savingReport}
+                  onClick={() => void handleSaveReport()}
+                  className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-xl hover:bg-primary-700 disabled:opacity-50"
+                >
+                  {savingReport ? 'Сохранение…' : 'Сохранить отчёт'}
+                </button>
+              )}
             </div>
           </div>
         </div>
