@@ -679,6 +679,23 @@ export default function SalesReportPage() {
                       Эту дату можно редактировать только администратору или руководителю
                     </p>
                   )}
+                  <div
+                    className="grid grid-cols-[1fr_repeat(3,minmax(0,5.25rem))] gap-2 items-end px-3 pb-1"
+                    aria-hidden
+                  >
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      Канал
+                    </span>
+                    <span className="text-[10px] font-semibold text-gray-600 text-center leading-snug">
+                      Новые заявки
+                    </span>
+                    <span className="text-[10px] font-semibold text-gray-600 text-center leading-snug">
+                      Заинтересованные заявки
+                    </span>
+                    <span className="text-[10px] font-semibold text-gray-600 text-center leading-snug">
+                      Заказы
+                    </span>
+                  </div>
               {SALES_REPORT_CHANNEL_GROUPS.map((group) => (
                 <div key={group.title}>
                   <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
@@ -693,7 +710,7 @@ export default function SalesReportPage() {
                       return (
                         <div
                           key={chId}
-                          className="grid grid-cols-[1fr_repeat(3,minmax(0,4.5rem))] gap-2 items-center rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2"
+                          className="grid grid-cols-[1fr_repeat(3,minmax(0,5.25rem))] gap-2 items-center rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2"
                         >
                           <span className="text-sm font-medium text-gray-800 truncate">
                             {displayLabel}
