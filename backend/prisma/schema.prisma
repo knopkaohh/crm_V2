@@ -351,6 +351,9 @@ model Task {
   leadId      String?
   orderId     String?
 
+  // Автоматические задачи (daily_sales_report, avito_old_clients, …)
+  systemKey   String?
+
   // Отношения
   creator     User      @relation("TaskCreator", fields: [creatorId], references: [id])
   assignee     User?     @relation("TaskAssignee", fields: [assigneeId], references: [id])
@@ -362,6 +365,8 @@ model Task {
   @@index([assigneeId])
   @@index([creatorId])
   @@index([dueDate])
+  @@index([systemKey])
+  @@index([assigneeId, systemKey])
   @@map("tasks")
 }
 

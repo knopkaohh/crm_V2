@@ -1,5 +1,6 @@
 import express from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { ensureDailyWorkTasks } from '../utils/daily-work-tasks';
 import { sendNotification } from '../utils/socket';
 import { prisma } from '../utils/prisma';
 
@@ -8,7 +9,8 @@ const router = express.Router();
 // Получить все задачи
 router.get('/', authenticate, async (req: AuthRequest, res) => {
   try {
-    const { status, assigneeId, creatorId, priority, dueDate } = req.query;
+    const { status, assigneeId, creatorId, priority, dueDate, board } = req.query;
+    const boardMode = board === '1' || board === 'true';
 
     const where: any = {};
 
@@ -16,24 +18,30 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
       where.status = status;
     }
 
-    if (assigneeId) {
-      where.assigneeId = assigneeId as string;
-    }
+    if (boardMode) {
+      const boardAssigneeId = (assigneeId as string) || req.userId!;
+      await ensureDailyWorkTasks(boardAssigneeId);
+      where.assigneeId = boardAssigneeId;
+    } else {
+      if (assigneeId) {
+        where.assigneeId = assigneeId as string;
+      }
 
-    if (creatorId) {
-      where.creatorId = creatorId as string;
+      if (creatorId) {
+        where.creatorId = creatorId as string;
+      }
+
+      // Менеджеры видят свои задачи (как созданные, так и назначенные)
+      if (req.userRole === 'SALES_MANAGER') {
+        where.OR = [
+          { assigneeId: req.userId },
+          { creatorId: req.userId },
+        ];
+      }
     }
 
     if (priority) {
       where.priority = parseInt(priority as string);
-    }
-
-    // Менеджеры видят свои задачи (как созданные, так и назначенные)
-    if (req.userRole === 'SALES_MANAGER') {
-      where.OR = [
-        { assigneeId: req.userId },
-        { creatorId: req.userId },
-      ];
     }
 
     // Фильтр по дате выполнения
@@ -130,6 +138,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
         assigneeId: true,
         leadId: true,
         orderId: true,
+        systemKey: true,
         creator: {
           select: {
             id: true,
@@ -168,15 +177,6 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
 
     if (!task) {
       return res.status(404).json({ error: 'Задача не найдена' });
-    }
-
-    // Проверка прав доступа
-    if (
-      req.userRole === 'SALES_MANAGER' &&
-      task.creatorId !== req.userId &&
-      task.assigneeId !== req.userId
-    ) {
-      return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 
     res.json(task);

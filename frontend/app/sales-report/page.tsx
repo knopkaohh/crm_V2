@@ -283,7 +283,7 @@ export default function SalesReportPage() {
 
   return (
     <Layout>
-      <div className="flex flex-col gap-3 min-h-0 h-[calc(100vh-5.5rem)]">
+      <div className="flex flex-col gap-4">
         {/* Header */}
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 flex-shrink-0">
           <div>
@@ -345,53 +345,53 @@ export default function SalesReportPage() {
 
         {/* KPI + каналы — компактный блок */}
         {summary && (
-          <div className="flex-shrink-0 space-y-2">
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-              <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
-                <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Заявки</p>
-                <p className="text-lg font-bold text-gray-900 tabular-nums leading-tight">
+          <div className="flex-shrink-0 space-y-3">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Заявки</p>
+                <p className="text-2xl font-bold text-gray-900 tabular-nums leading-tight mt-1">
                   {summary.totalApplications.toLocaleString('ru-RU')}
                 </p>
               </div>
-              <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
-                <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">
+              <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                   Заинтересованные
                 </p>
-                <p className="text-lg font-bold text-gray-900 tabular-nums leading-tight">
+                <p className="text-2xl font-bold text-gray-900 tabular-nums leading-tight mt-1">
                   {summary.totalInterested.toLocaleString('ru-RU')}
                 </p>
               </div>
-              <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
-                <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Заказы</p>
-                <p className="text-lg font-bold text-gray-900 tabular-nums leading-tight">
+              <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Заказы</p>
+                <p className="text-2xl font-bold text-gray-900 tabular-nums leading-tight mt-1">
                   {summary.totalOrders.toLocaleString('ru-RU')}
                 </p>
               </div>
-              <div className="rounded-xl border border-primary-200 bg-primary-50/60 px-3 py-2 shadow-sm">
-                <p className="text-[10px] font-medium text-primary-700 uppercase tracking-wide">
+              <div className="rounded-xl border border-primary-200 bg-primary-50/60 px-4 py-3 shadow-sm">
+                <p className="text-xs font-medium text-primary-700 uppercase tracking-wide">
                   Конверсия
                 </p>
-                <p className="text-lg font-bold text-primary-800 tabular-nums leading-tight">
+                <p className="text-2xl font-bold text-primary-800 tabular-nums leading-tight mt-1">
                   {summary.conversionPercent}%
                 </p>
               </div>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
-              <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+            <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
                 По каналам
               </p>
-              <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-1.5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2">
                 {summary.byChannel.map((ch) => (
                   <div
                     key={ch.channel}
-                    className="rounded-lg border border-gray-100 bg-gray-50/90 px-2 py-1.5 min-w-0"
+                    className="rounded-lg border border-gray-100 bg-gray-50/90 px-2.5 py-2 min-w-0"
                   >
-                    <p className="text-[10px] font-medium text-gray-600 leading-tight truncate" title={ch.label}>
+                    <p className="text-xs font-medium text-gray-600 leading-tight truncate" title={ch.label}>
                       {ch.label}
                     </p>
-                    <div className="flex items-center justify-between gap-1 mt-0.5">
-                      <span className="text-sm font-bold text-gray-900 tabular-nums">{ch.applications}</span>
-                      <span className="text-[10px] font-semibold text-primary-700">{ch.conversionPercent}%</span>
+                    <div className="flex items-center justify-between gap-1 mt-1">
+                      <span className="text-base font-bold text-gray-900 tabular-nums">{ch.applications}</span>
+                      <span className="text-xs font-semibold text-primary-700">{ch.conversionPercent}%</span>
                     </div>
                   </div>
                 ))}
@@ -446,8 +446,8 @@ export default function SalesReportPage() {
           />
         </div>
 
-        {/* Managers table — максимум места на экране */}
-        <div className="flex-1 min-h-0 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-lg shadow-primary-900/5 flex flex-col">
+        {/* Managers table */}
+        <div className="rounded-2xl border border-gray-200 bg-white shadow-lg shadow-primary-900/5 flex flex-col max-h-[48vh] min-h-[280px]">
           <div className="flex-1 min-h-0 overflow-auto">
           {!data?.managers?.length ? (
             <div className="py-16 text-center text-gray-500 text-sm">
