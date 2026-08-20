@@ -1,6 +1,6 @@
 import express from 'express';
 import { SalesReportChannel } from '@prisma/client';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import {
   SALES_REPORT_CHANNELS,
@@ -319,6 +319,37 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Save sales report error:', error);
     res.status(500).json({ error: 'Ошибка при сохранении отчёта' });
+  }
+});
+
+// Удалить дневной отчёт менеджера (только администратор)
+router.delete('/day', authenticate, requireRole('ADMIN'), async (req: AuthRequest, res) => {
+  try {
+    const dateStr = req.query.date as string;
+    const managerId = req.query.managerId as string;
+
+    if (!managerId) {
+      return res.status(400).json({ error: 'Укажите managerId' });
+    }
+
+    const date = parseDateOnly(dateStr);
+    if (!date) {
+      return res.status(400).json({ error: 'Укажите дату в формате YYYY-MM-DD' });
+    }
+
+    const participants = await loadParticipants();
+    if (!participants.some((p) => p.id === managerId)) {
+      return res.status(400).json({ error: 'Менеджер не участвует в отчёте' });
+    }
+
+    const result = await prisma.dailySalesReport.deleteMany({
+      where: { managerId, date },
+    });
+
+    res.json({ success: true, deleted: result.count });
+  } catch (error) {
+    console.error('Delete sales report day error:', error);
+    res.status(500).json({ error: 'Ошибка при удалении отчёта' });
   }
 });
 

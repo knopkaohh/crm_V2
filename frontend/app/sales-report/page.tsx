@@ -22,6 +22,7 @@ import {
   Plus,
   UserRound,
   X,
+  Trash2,
 } from 'lucide-react'
 
 interface ChannelStat {
@@ -113,6 +114,9 @@ export default function SalesReportPage() {
   const [formEntries, setFormEntries] = useState<FormEntry[]>(emptyFormEntries())
   const [formCanEdit, setFormCanEdit] = useState(true)
   const [savingReport, setSavingReport] = useState(false)
+  const [deletingDayKey, setDeletingDayKey] = useState<string | null>(null)
+
+  const isAdmin = currentUser?.role === 'ADMIN'
 
   useEffect(() => {
     void auth.getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null))
@@ -246,6 +250,27 @@ export default function SalesReportPage() {
     })
   }
 
+  const handleDeleteDayReport = async (managerId: string, date: string, managerName: string) => {
+    if (
+      !confirm(
+        `Удалить отчёт ${formatDateRu(date)} для ${managerName}?\n\nВсе данные за этот день будут удалены.`,
+      )
+    ) {
+      return
+    }
+    const dayKey = `${managerId}-${date}`
+    setDeletingDayKey(dayKey)
+    try {
+      await api.delete('/sales-reports/day', { params: { managerId, date } })
+      await loadDashboard()
+    } catch (e: unknown) {
+      const ax = e as { response?: { data?: { error?: string } } }
+      alert(ax.response?.data?.error || 'Не удалось удалить отчёт')
+    } finally {
+      setDeletingDayKey(null)
+    }
+  }
+
   if (loading && !data) {
     return (
       <Layout>
@@ -258,16 +283,16 @@ export default function SalesReportPage() {
 
   return (
     <Layout>
-      <div className="space-y-6 max-h-[calc(100vh-5rem)] min-h-0 flex flex-col">
+      <div className="flex flex-col gap-3 min-h-0 h-[calc(100vh-5.5rem)]">
         {/* Header */}
-        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 flex-shrink-0">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 flex-shrink-0">
           <div>
             <div className="flex items-center gap-2">
-              <BarChart3 className="h-8 w-8 text-primary-600" />
-              <h1 className="text-3xl font-bold text-gray-900">Отчёт по продажам</h1>
+              <BarChart3 className="h-7 w-7 text-primary-600" />
+              <h1 className="text-2xl font-bold text-gray-900">Отчёт по продажам</h1>
             </div>
-            <p className="text-gray-600 mt-1 ml-10">
-              Дневная статистика по каналам · {periodLabel}
+            <p className="text-sm text-gray-600 mt-0.5 ml-9">
+              {periodLabel}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -318,70 +343,65 @@ export default function SalesReportPage() {
           </div>
         </div>
 
-        {/* KPI */}
+        {/* KPI + каналы — компактный блок */}
         {summary && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 flex-shrink-0">
-            <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Заявки</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">
-                {summary.totalApplications.toLocaleString('ru-RU')}
-              </p>
+          <div className="flex-shrink-0 space-y-2">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+              <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
+                <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Заявки</p>
+                <p className="text-lg font-bold text-gray-900 tabular-nums leading-tight">
+                  {summary.totalApplications.toLocaleString('ru-RU')}
+                </p>
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
+                <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">
+                  Заинтересованные
+                </p>
+                <p className="text-lg font-bold text-gray-900 tabular-nums leading-tight">
+                  {summary.totalInterested.toLocaleString('ru-RU')}
+                </p>
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
+                <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Заказы</p>
+                <p className="text-lg font-bold text-gray-900 tabular-nums leading-tight">
+                  {summary.totalOrders.toLocaleString('ru-RU')}
+                </p>
+              </div>
+              <div className="rounded-xl border border-primary-200 bg-primary-50/60 px-3 py-2 shadow-sm">
+                <p className="text-[10px] font-medium text-primary-700 uppercase tracking-wide">
+                  Конверсия
+                </p>
+                <p className="text-lg font-bold text-primary-800 tabular-nums leading-tight">
+                  {summary.conversionPercent}%
+                </p>
+              </div>
             </div>
-            <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                Заинтересованные
+            <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
+              <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                По каналам
               </p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">
-                {summary.totalInterested.toLocaleString('ru-RU')}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Заказы</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">
-                {summary.totalOrders.toLocaleString('ru-RU')}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-primary-200 bg-primary-50/60 p-4 shadow-sm">
-              <p className="text-xs font-medium text-primary-700 uppercase tracking-wide">
-                Конверсия в заказ
-              </p>
-              <p className="text-2xl font-bold text-primary-800 mt-1">
-                {summary.conversionPercent}%
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Channel breakdown */}
-        {summary && (
-          <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm flex-shrink-0">
-            <h2 className="text-sm font-semibold text-gray-900 mb-4">Заявки и конверсия по каналам</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {summary.byChannel.map((ch) => (
-                <div
-                  key={ch.channel}
-                  className="rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-3"
-                >
-                  <p className="text-xs font-medium text-gray-600 leading-snug">{ch.label}</p>
-                  <div className="mt-2 flex items-end justify-between gap-2">
-                    <span className="text-lg font-bold text-gray-900 tabular-nums">
-                      {ch.applications}
-                    </span>
-                    <span className="text-xs font-semibold text-primary-700 bg-primary-100 px-2 py-0.5 rounded-full">
-                      {ch.conversionPercent}%
-                    </span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-1.5">
+                {summary.byChannel.map((ch) => (
+                  <div
+                    key={ch.channel}
+                    className="rounded-lg border border-gray-100 bg-gray-50/90 px-2 py-1.5 min-w-0"
+                  >
+                    <p className="text-[10px] font-medium text-gray-600 leading-tight truncate" title={ch.label}>
+                      {ch.label}
+                    </p>
+                    <div className="flex items-center justify-between gap-1 mt-0.5">
+                      <span className="text-sm font-bold text-gray-900 tabular-nums">{ch.applications}</span>
+                      <span className="text-[10px] font-semibold text-primary-700">{ch.conversionPercent}%</span>
+                    </div>
                   </div>
-                  <p className="text-[10px] text-gray-500 mt-1">
-                    заказов {ch.orders} · заинт. {ch.interested}
-                  </p>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         )}
 
         {/* Filters */}
-        <div className="flex flex-wrap gap-3 flex-shrink-0 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+        <div className="flex flex-wrap gap-2 flex-shrink-0 rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
           <label className="flex items-center gap-2">
             <UserRound className="h-4 w-4 text-gray-400" />
             <select
@@ -426,8 +446,9 @@ export default function SalesReportPage() {
           />
         </div>
 
-        {/* Managers table */}
-        <div className="flex-1 min-h-0 overflow-auto rounded-3xl border border-gray-200 bg-white shadow-xl shadow-primary-900/5">
+        {/* Managers table — максимум места на экране */}
+        <div className="flex-1 min-h-0 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-lg shadow-primary-900/5 flex flex-col">
+          <div className="flex-1 min-h-0 overflow-auto">
           {!data?.managers?.length ? (
             <div className="py-16 text-center text-gray-500 text-sm">
               Нет данных за выбранный период
@@ -474,7 +495,8 @@ export default function SalesReportPage() {
                                 <th className="py-2 pr-3 text-right">Заявки</th>
                                 <th className="py-2 pr-3 text-right">Заинтерес.</th>
                                 <th className="py-2 pr-3 text-right">Заказы</th>
-                                <th className="py-2 text-right">Конверсия</th>
+                                <th className="py-2 pr-3 text-right">Конверсия</th>
+                                {isAdmin && <th className="py-2 w-10" aria-label="Удалить" />}
                               </tr>
                             </thead>
                             <tbody>
@@ -483,10 +505,7 @@ export default function SalesReportPage() {
                                 const dayOpen = expandedDays.has(dayKey)
                                 return (
                                   <Fragment key={dayKey}>
-                                    <tr
-                                      key={dayKey}
-                                      className="border-t border-gray-100 hover:bg-white/80"
-                                    >
+                                    <tr className="border-t border-gray-100 hover:bg-white/80">
                                       <td className="py-2 pr-2">
                                         <button
                                           type="button"
@@ -512,9 +531,28 @@ export default function SalesReportPage() {
                                       <td className="py-2 pr-3 text-right tabular-nums">
                                         {day.totals.orders}
                                       </td>
-                                      <td className="py-2 text-right tabular-nums font-medium text-primary-700">
+                                      <td className="py-2 pr-3 text-right tabular-nums font-medium text-primary-700">
                                         {day.totals.conversionPercent}%
                                       </td>
+                                      {isAdmin && (
+                                        <td className="py-2 text-right">
+                                          <button
+                                            type="button"
+                                            disabled={deletingDayKey === dayKey}
+                                            onClick={() =>
+                                              void handleDeleteDayReport(manager.managerId, day.date, name)
+                                            }
+                                            className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                                            title="Удалить отчёт за день"
+                                          >
+                                            {deletingDayKey === dayKey ? (
+                                              <div className="h-4 w-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                                            ) : (
+                                              <Trash2 className="h-4 w-4" />
+                                            )}
+                                          </button>
+                                        </td>
+                                      )}
                                     </tr>
                                     {dayOpen &&
                                       day.channels
@@ -538,6 +576,7 @@ export default function SalesReportPage() {
                                             <td className="py-1.5 text-right tabular-nums">
                                               {ch.conversionPercent}%
                                             </td>
+                                            {isAdmin && <td />}
                                           </tr>
                                         ))}
                                   </Fragment>
@@ -553,6 +592,7 @@ export default function SalesReportPage() {
               })}
             </div>
           )}
+          </div>
         </div>
       </div>
 
