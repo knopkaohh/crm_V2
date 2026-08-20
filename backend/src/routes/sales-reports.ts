@@ -234,7 +234,7 @@ router.get('/day', authenticate, async (req: AuthRequest, res) => {
     });
 
     res.json({
-      date: dateStr,
+      date: dateNorm,
       managerId,
       exists: rows.length > 0,
       canEdit: canEditReportDate(req.userRole, date),
@@ -265,10 +265,12 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Вы не участвуете в отчёте по продажам' });
     }
 
-    const date = parseDateOnly(dateStr || '');
-    if (!date) {
+    const dateNorm = normalizeDateOnlyString(dateStr || '');
+    if (!dateNorm) {
       return res.status(400).json({ error: 'Укажите дату в формате YYYY-MM-DD' });
     }
+
+    const date = parseDateOnly(dateNorm)!;
 
     if (!canEditReportDate(req.userRole, date)) {
       return res.status(403).json({
@@ -318,7 +320,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       });
     }
 
-    res.json({ success: true, date: formatDateOnly(date) });
+    res.json({ success: true, date: dateNorm });
   } catch (error) {
     console.error('Save sales report error:', error);
     res.status(500).json({ error: 'Ошибка при сохранении отчёта' });

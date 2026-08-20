@@ -57,25 +57,35 @@ export function normalizeDateOnlyString(input: string): string | null {
   const year = parts[0];
   const month = parts[1];
   const day = parts[2];
-  const d = new Date(year, month - 1, day);
+  const d = new Date(Date.UTC(year, month - 1, day));
   if (
-    d.getFullYear() !== year ||
-    d.getMonth() !== month - 1 ||
-    d.getDate() !== day
+    d.getUTCFullYear() !== year ||
+    d.getUTCMonth() !== month - 1 ||
+    d.getUTCDate() !== day
   ) {
     return null;
   }
   return iso[1];
 }
 
+/** Календарная дата для PostgreSQL DATE (UTC, без сдвига часового пояса) */
 export function parseDateOnly(input: string): Date | null {
   const normalized = normalizeDateOnlyString(input);
   if (!normalized) return null;
   const [year, month, day] = normalized.split('-').map(Number);
-  return new Date(year, month - 1, day);
+  return new Date(Date.UTC(year, month - 1, day));
 }
 
+/** Чтение DATE из БД в YYYY-MM-DD */
 export function formatDateOnly(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Календарный день в локальной зоне сервера (для «сегодня») */
+export function formatCalendarDateLocal(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -89,13 +99,11 @@ export function canEditReportDate(
 ): boolean {
   if (userRole === 'ADMIN' || userRole === 'EXECUTIVE') return true;
 
-  const t = new Date(today);
-  t.setHours(0, 0, 0, 0);
-  const target = new Date(reportDate);
-  target.setHours(0, 0, 0, 0);
-  const prevBiz = getPreviousBusinessDay(t);
+  const targetStr = formatDateOnly(reportDate);
+  const todayStr = formatCalendarDateLocal(today);
+  const prevBizStr = formatCalendarDateLocal(getPreviousBusinessDay(today));
 
-  return target.getTime() === t.getTime() || target.getTime() === prevBiz.getTime();
+  return targetStr === todayStr || targetStr === prevBizStr;
 }
 
 export function parsePeriodMonth(period: string): { start: Date; end: Date } | null {
@@ -104,9 +112,7 @@ export function parsePeriodMonth(period: string): { start: Date; end: Date } | n
   const year = Number(m[1]);
   const month = Number(m[2]);
   if (month < 1 || month > 12) return null;
-  const start = new Date(year, month - 1, 1);
-  const end = new Date(year, month, 0);
-  start.setHours(0, 0, 0, 0);
-  end.setHours(23, 59, 59, 999);
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
   return { start, end };
 }
