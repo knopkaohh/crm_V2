@@ -47,7 +47,10 @@ interface Order {
     name: string
     quantity: number
     price: number
+    material?: string | null
     desiredDeadline?: string | null
+    productionStartDate?: string | null
+    productionEndDate?: string | null
   }> | null
   deadline: string | null
   createdAt: string
@@ -363,8 +366,8 @@ export default function OrdersPage() {
     }
   }
 
-  const handleOrderReady = async (orderId: string, e: React.MouseEvent) => {
-    e.stopPropagation()
+  const handleOrderReady = async (orderId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
 
     const order = orders.find((o) => o.id === orderId)
     if (!order) return
@@ -383,6 +386,64 @@ export default function OrdersPage() {
         prevOrders.map((o) => (o.id === orderId ? { ...o, status: previousStatus } : o))
       )
       alert('Ошибка при переводе заказа в "Готов"')
+    }
+  }
+
+  const handleItemReady = async (orderId: string, itemId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+
+    const order = orders.find((o) => o.id === orderId)
+    if (!order) return
+    const item = (order.items || []).find((it) => it.id === itemId)
+    if (!item || item.productionEndDate) return
+
+    setOrders((prevOrders) =>
+      prevOrders.map((o) => {
+        if (o.id !== orderId) return o
+        return {
+          ...o,
+          items: (o.items || []).map((it) =>
+            it.id === itemId ? { ...it, productionEndDate: new Date().toISOString() } : it,
+          ),
+        }
+      }),
+    )
+
+    try {
+      await api.put(`/orders/${orderId}/items/${itemId}`, {
+        productionEndDate: new Date().toISOString(),
+      })
+      const refreshed = await api.get(`/orders/${orderId}`, { headers: { 'X-Skip-Cache': '1' } })
+      const refreshedOrder = refreshed.data
+      const itemIds = (refreshedOrder.items || []).map((it: { id: string }) => it.id).filter(Boolean)
+      const allReady =
+        itemIds.length > 0 &&
+        itemIds.every((id: string) => {
+          const it = (refreshedOrder.items || []).find((x: { id: string }) => x.id === id)
+          return Boolean(it?.productionEndDate)
+        })
+
+      setOrders((prevOrders) =>
+        prevOrders.map((o) =>
+          o.id === orderId
+            ? {
+                ...o,
+                items: refreshedOrder.items,
+                status: allReady ? 'ORDER_READY' : o.status,
+              }
+            : o,
+        ),
+      )
+
+      if (allReady && refreshedOrder.status !== 'ORDER_READY') {
+        await api.put(`/orders/${orderId}`, { status: 'ORDER_READY' })
+      }
+    } catch (error) {
+      console.error('Failed to mark item ready:', error)
+      setOrders((prevOrders) =>
+        prevOrders.map((o) => (o.id === orderId ? order : o)),
+      )
+      alert('Не удалось отметить позицию как готовую')
     }
   }
 
@@ -735,6 +796,42 @@ export default function OrdersPage() {
                           >
                             Заказ запущен
                           </button>
+                        </div>
+                      )}
+
+                      {/* Позиции и готовность на этапе «В производстве» */}
+                      {order.status === 'IN_PRODUCTION' && (order.items || []).length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
+                            Позиции
+                          </p>
+                          {(order.items || []).map((item) => {
+                            const label =
+                              (item.name || item.material || '').trim() || 'Позиция'
+                            return (
+                              <div
+                                key={item.id}
+                                className="flex items-center justify-between gap-2 rounded-lg bg-white/70 border border-gray-100 px-2 py-1.5"
+                              >
+                                <span className="text-xs text-gray-800 truncate min-w-0">
+                                  {label}
+                                  <span className="text-gray-400"> · x{item.quantity}</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleItemReady(order.id, item.id, e)}
+                                  disabled={Boolean(item.productionEndDate)}
+                                  className={`shrink-0 px-2 py-1 text-[10px] rounded-md font-medium transition-colors ${
+                                    item.productionEndDate
+                                      ? 'bg-emerald-100 text-emerald-700 border border-emerald-200 cursor-not-allowed'
+                                      : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                  }`}
+                                >
+                                  Готов
+                                </button>
+                              </div>
+                            )
+                          })}
                         </div>
                       )}
 

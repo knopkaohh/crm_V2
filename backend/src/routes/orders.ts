@@ -147,6 +147,8 @@ router.get('/', authenticate, async (req, res) => {
               price: true,
               material: true,
               desiredDeadline: true,
+              productionStartDate: true,
+              productionEndDate: true,
             },
           },
           _count: {
@@ -1095,6 +1097,18 @@ router.put('/:orderId/items/:itemId', authenticate, async (req: AuthRequest, res
       updateData.desiredDeadline = new Date(updateData.desiredDeadline);
     } else if (updateData.desiredDeadline === null || updateData.desiredDeadline === '') {
       updateData.desiredDeadline = null;
+    }
+
+    if (updateData.productionStartDate) {
+      updateData.productionStartDate = new Date(updateData.productionStartDate);
+    } else if (updateData.productionStartDate === null || updateData.productionStartDate === '') {
+      updateData.productionStartDate = null;
+    }
+
+    if (updateData.productionEndDate) {
+      updateData.productionEndDate = new Date(updateData.productionEndDate);
+    } else if (updateData.productionEndDate === null || updateData.productionEndDate === '') {
+      updateData.productionEndDate = null;
     }
 
     // Удаляем undefined значения и пустые строки для опциональных полей

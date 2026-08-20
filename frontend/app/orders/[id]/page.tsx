@@ -354,6 +354,31 @@ export default function OrderDetailPage() {
     }
   }
 
+  const handleItemReady = async (itemId?: string) => {
+    if (!order || !itemId) return
+    const targetItem = (order.items || []).find((item) => item.id === itemId)
+    if (targetItem?.productionEndDate) return
+
+    await api.put(`/orders/${order.id}/items/${itemId}`, {
+      productionEndDate: new Date().toISOString(),
+    })
+
+    const refreshed = await api.get(`/orders/${order.id}`, {
+      headers: { 'X-Skip-Cache': '1' },
+    })
+    setOrder(refreshed.data)
+    const itemIds = (refreshed.data.items || []).map((item: OrderItem) => item.id).filter(Boolean) as string[]
+    const allReady =
+      itemIds.length > 0 &&
+      itemIds.every((id) => {
+        const item = (refreshed.data.items || []).find((it: OrderItem) => it.id === id)
+        return Boolean(item?.productionEndDate)
+      })
+    if (allReady) {
+      await handleOrderReady()
+    }
+  }
+
   const handleOrderReady = async () => {
     if (!order) return
     try {
@@ -864,7 +889,10 @@ export default function OrderDetailPage() {
                           {order.status === 'AWAITING_MATERIALS' && it.id && (
                             <button
                               type="button"
-                              onClick={() => handleItemStarted(it.id)}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleItemStarted(it.id)
+                              }}
                               disabled={Boolean(it.productionStartDate)}
                               className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${
                                 it.productionStartDate
@@ -873,6 +901,23 @@ export default function OrderDetailPage() {
                               }`}
                             >
                               Запущено
+                            </button>
+                          )}
+                          {order.status === 'IN_PRODUCTION' && it.id && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleItemReady(it.id)
+                              }}
+                              disabled={Boolean(it.productionEndDate)}
+                              className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${
+                                it.productionEndDate
+                                  ? 'bg-emerald-100 text-emerald-700 border border-emerald-200 cursor-not-allowed'
+                                  : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                              }`}
+                            >
+                              Готов
                             </button>
                           )}
                         </div>
@@ -888,7 +933,7 @@ export default function OrderDetailPage() {
                       {(it.material || it.designCount || it.baseColor || it.printColor || it.cutting || 
                         it.postProcessing || it.coating || it.singleSidedPrint !== undefined || 
                         it.doubleSidedPrint !== undefined || it.density || it.desiredDeadline || 
-                        it.productionComments) && (
+                        it.productionComments || it.productionStartDate || it.productionEndDate) && (
                         <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
                           <p className="text-xs font-semibold text-gray-700 uppercase mb-2">Параметры производства</p>
                           
@@ -1024,6 +1069,24 @@ export default function OrderDetailPage() {
                             <div className="flex items-start gap-2 text-sm">
                               <span className="text-gray-500 min-w-[120px]">Комментарии:</span>
                               <span className="text-gray-900">{it.productionComments}</span>
+                            </div>
+                          )}
+
+                          {it.productionStartDate && (
+                            <div className="flex items-start gap-2 text-sm">
+                              <span className="text-gray-500 min-w-[120px]">Запущено:</span>
+                              <span className="text-gray-900 font-medium">
+                                {new Date(it.productionStartDate).toLocaleString('ru-RU')}
+                              </span>
+                            </div>
+                          )}
+
+                          {it.productionEndDate && (
+                            <div className="flex items-start gap-2 text-sm">
+                              <span className="text-gray-500 min-w-[120px]">Готово:</span>
+                              <span className="text-emerald-700 font-medium">
+                                {new Date(it.productionEndDate).toLocaleString('ru-RU')}
+                              </span>
                             </div>
                           )}
                         </div>
