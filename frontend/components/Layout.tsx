@@ -10,8 +10,6 @@ import {
   TrendingUp,
   ShoppingCart,
   ClipboardList,
-  Phone,
-  BarChart3,
   Settings,
   Bell,
   LogOut,
@@ -20,6 +18,7 @@ import {
   Clock,
   FileSpreadsheet,
   Kanban,
+  BarChart3,
 } from 'lucide-react'
 import api from '@/lib/api'
 import { getApiBaseUrl } from '@/lib/url'
@@ -179,10 +178,9 @@ export default function Layout({ children }: LayoutProps) {
     { href: '/orders/accounting', label: 'Учёт заказов', icon: FileSpreadsheet },
     { href: '/clients', label: 'Клиенты', icon: Users },
     { href: '/project-sales', label: 'Проектные продажи', icon: Kanban },
-    { href: '/calls', label: 'Теплые обзвоны', icon: Phone },
+    { href: '/sales-report', label: 'Отчёт по продажам', icon: BarChart3 },
+    { href: '/work-tasks', label: 'Задачи', icon: ClipboardList },
   ]
-
-  menuItems.push({ href: '/analytics', label: 'Аналитика', icon: BarChart3 })
 
   if (user.role === 'ADMIN') {
     menuItems.push({ href: '/admin', label: 'Админ-панель', icon: Settings })

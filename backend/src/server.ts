@@ -45,7 +45,6 @@ import clientRoutes from './routes/clients';
 import leadRoutes from './routes/leads';
 import orderRoutes from './routes/orders';
 import taskRoutes from './routes/tasks';
-import callRoutes from './routes/calls';
 import fileRoutes from './routes/files';
 import analyticsRoutes from './routes/analytics';
 import notificationRoutes from './routes/notifications';
@@ -53,7 +52,7 @@ import chatRoutes from './routes/chats';
 import productionCalendarRoutes from './routes/production-calendar';
 import telegramRoutes from './routes/telegram';
 import projectSalesRoutes from './routes/project-sales';
-import { startColdCallsSyncCron } from './utils/cold-calls-cron';
+import salesReportRoutes from './routes/sales-reports';
 import { startLeadCallReminderCron } from './utils/lead-call-reminder-cron';
 
 app.use('/api/auth', authRoutes);
@@ -62,7 +61,6 @@ app.use('/api/clients', clientRoutes);
 app.use('/api/leads', leadRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/tasks', taskRoutes);
-app.use('/api/calls', callRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/notifications', notificationRoutes);
@@ -70,6 +68,7 @@ app.use('/api/chats', chatRoutes);
 app.use('/api/production-calendar', productionCalendarRoutes);
 app.use('/api/telegram', telegramRoutes);
 app.use('/api/project-sales', projectSalesRoutes);
+app.use('/api/sales-reports', salesReportRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -97,7 +96,6 @@ const PORT = process.env.PORT || 3001;
 
 httpServer.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  startColdCallsSyncCron();
   startLeadCallReminderCron();
 }).on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {

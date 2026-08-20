@@ -106,6 +106,7 @@ model User {
   projectSalesAsManager ProjectSale[] @relation("ProjectSaleManager")
   projectSalesCreated   ProjectSale[] @relation("ProjectSaleCreator")
   monthlyManagerPlans   MonthlyManagerPlan[]
+  dailySalesReports     DailySalesReport[]
 
   @@index([email])
   @@index([role])
@@ -603,4 +604,35 @@ model MessageTemplate {
 
   @@index([userId])
   @@map("message_templates")
+}
+
+// Дневные отчёты по продажам (каналы заявок)
+enum SalesReportChannel {
+  AVITO
+  SITE
+  REFERRAL_SOCIAL
+  PROJECT_SALES
+  CLIENT_BASE_NEW
+  CLIENT_BASE_REGULAR
+  CLIENT_BASE_LOST
+  CLIENT_BASE_CROSS_SELL
+}
+
+model DailySalesReport {
+  id           String             @id @default(uuid())
+  managerId    String
+  date         DateTime           @db.Date
+  channel      SalesReportChannel
+  applications Int                @default(0)
+  interested   Int                @default(0)
+  orders       Int                @default(0)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  manager User @relation(fields: [managerId], references: [id])
+
+  @@unique([managerId, date, channel])
+  @@index([date])
+  @@index([managerId])
+  @@map("daily_sales_reports")
 }
