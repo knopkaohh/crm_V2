@@ -107,6 +107,8 @@ model User {
   projectSalesCreated   ProjectSale[] @relation("ProjectSaleCreator")
   monthlyManagerPlans   MonthlyManagerPlan[]
   dailySalesReports     DailySalesReport[]
+  massTaskTemplatesCreated MassTaskTemplate[] @relation("MassTaskTemplateCreator")
+  massTaskTemplateAssignments MassTaskTemplateManager[]
 
   @@index([email])
   @@index([role])
@@ -344,6 +346,7 @@ model Task {
   assigneeId  String?
   dueDate     DateTime?
   completedAt DateTime?
+  closedAt    DateTime?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
@@ -351,23 +354,61 @@ model Task {
   leadId      String?
   orderId     String?
 
-  // Автоматические задачи (daily_sales_report, avito_old_clients, …)
-  systemKey   String?
+  // Автоматические / массовые задачи
+  systemKey       String?
+  massTemplateId  String?
 
   // Отношения
   creator     User      @relation("TaskCreator", fields: [creatorId], references: [id])
   assignee     User?     @relation("TaskAssignee", fields: [assigneeId], references: [id])
   lead         Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
   order        Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  massTemplate MassTaskTemplate? @relation(fields: [massTemplateId], references: [id], onDelete: SetNull)
   comments     Comment[]
 
   @@index([status])
   @@index([assigneeId])
   @@index([creatorId])
   @@index([dueDate])
+  @@index([closedAt])
   @@index([systemKey])
+  @@index([massTemplateId])
   @@index([assigneeId, systemKey])
   @@map("tasks")
+}
+
+// Шаблоны массовых (повторяющихся) задач
+model MassTaskTemplate {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  priority    Int      @default(1)
+  systemKey   String   @unique
+  weekdays    Int      // битовая маска: Пн=1, Вт=2, Ср=4, Чт=8, Пт=16, Сб=32, Вс=64
+  isActive    Boolean  @default(true)
+  linkPath    String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User                      @relation("MassTaskTemplateCreator", fields: [createdById], references: [id])
+  managers  MassTaskTemplateManager[]
+  tasks     Task[]
+
+  @@map("mass_task_templates")
+}
+
+model MassTaskTemplateManager {
+  id         String @id @default(uuid())
+  templateId String
+  managerId  String
+
+  template MassTaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  manager  User             @relation(fields: [managerId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, managerId])
+  @@index([managerId])
+  @@map("mass_task_template_managers")
 }
 
 // Холодные звонки

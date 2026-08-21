@@ -1,10 +1,139 @@
 import express from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { ensureDailyWorkTasks } from '../utils/daily-work-tasks';
+import { ensureMassTasksForUser } from '../utils/mass-task-generator';
+import { getTaskBoardManagers } from '../utils/task-board-managers';
+import { isTaskPrivilegedRole } from '../utils/task-exclusions';
 import { sendNotification } from '../utils/socket';
 import { prisma } from '../utils/prisma';
+import { parsePeriodMonth } from '../utils/sales-report-participants';
 
 const router = express.Router();
+
+function startOfToday(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function canModifyTask(req: AuthRequest, task: { creatorId: string; assigneeId: string | null }) {
+  if (isTaskPrivilegedRole(req.userRole)) return true;
+  return task.creatorId === req.userId || task.assigneeId === req.userId;
+}
+
+function applyClosedAtOnStatusChange(
+  status: string | undefined,
+  existingTask: { status: string; completedAt: Date | null; closedAt: Date | null },
+  updateData: Record<string, unknown>,
+) {
+  if (status === undefined) return;
+  updateData.status = status;
+  if (status === 'COMPLETED') {
+    updateData.completedAt = new Date();
+    updateData.closedAt = new Date();
+  } else if (status === 'CANCELLED') {
+    updateData.completedAt = null;
+    updateData.closedAt = new Date();
+  } else {
+    updateData.completedAt = null;
+    updateData.closedAt = null;
+  }
+}
+
+// Менеджеры для доски задач
+router.get('/board-managers', authenticate, async (_req, res) => {
+  try {
+    const managers = await getTaskBoardManagers();
+    res.json(
+      managers.map((m) => ({
+        id: m.id,
+        firstName: m.firstName,
+        lastName: m.lastName,
+      })),
+    );
+  } catch (error) {
+    console.error('Get task board managers error:', error);
+    res.status(500).json({ error: 'Ошибка при загрузке менеджеров' });
+  }
+});
+
+// Статистика задач за месяц
+router.get('/stats', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const period = (req.query.period as string) || '';
+    const managerIdFilter = req.query.managerId as string | undefined;
+    const range = parsePeriodMonth(period);
+    if (!range) {
+      return res.status(400).json({ error: 'Укажите период в формате YYYY-MM' });
+    }
+
+    const managers = await getTaskBoardManagers();
+    const privileged = isTaskPrivilegedRole(req.userRole);
+
+    let targetManagers = managers;
+    if (!privileged) {
+      targetManagers = managers.filter((m) => m.id === req.userId);
+    } else if (managerIdFilter) {
+      targetManagers = managers.filter((m) => m.id === managerIdFilter);
+    }
+
+    const managerStats = await Promise.all(
+      targetManagers.map(async (manager) => {
+        const baseWhere = {
+          assigneeId: manager.id,
+          closedAt: { gte: range.start, lte: range.end },
+        };
+
+        const completed = await prisma.task.count({
+          where: { ...baseWhere, status: 'COMPLETED' },
+        });
+        const cancelled = await prisma.task.count({
+          where: { ...baseWhere, status: 'CANCELLED' },
+        });
+
+        const massCompleted = await prisma.task.count({
+          where: { ...baseWhere, status: 'COMPLETED', massTemplateId: { not: null } },
+        });
+        const massCancelled = await prisma.task.count({
+          where: { ...baseWhere, status: 'CANCELLED', massTemplateId: { not: null } },
+        });
+        const manualCompleted = await prisma.task.count({
+          where: {
+            ...baseWhere,
+            status: 'COMPLETED',
+            massTemplateId: null,
+            systemKey: null,
+          },
+        });
+        const manualCancelled = await prisma.task.count({
+          where: {
+            ...baseWhere,
+            status: 'CANCELLED',
+            massTemplateId: null,
+            systemKey: null,
+          },
+        });
+
+        return {
+          managerId: manager.id,
+          firstName: manager.firstName,
+          lastName: manager.lastName,
+          completed,
+          cancelled,
+          total: completed + cancelled,
+          byType: {
+            manual: { completed: manualCompleted, cancelled: manualCancelled },
+            mass: { completed: massCompleted, cancelled: massCancelled },
+          },
+        };
+      }),
+    );
+
+    res.json({ period, managers: managerStats });
+  } catch (error) {
+    console.error('Get task stats error:', error);
+    res.status(500).json({ error: 'Ошибка при загрузке статистики' });
+  }
+});
 
 // Получить все задачи
 router.get('/', authenticate, async (req: AuthRequest, res) => {
@@ -12,7 +141,7 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
     const { status, assigneeId, creatorId, priority, dueDate, board } = req.query;
     const boardMode = board === '1' || board === 'true';
 
-    const where: any = {};
+    const where: Record<string, unknown> = {};
 
     if (status) {
       where.status = status;
@@ -20,8 +149,18 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
 
     if (boardMode) {
       const boardAssigneeId = (assigneeId as string) || req.userId!;
-      await ensureDailyWorkTasks(boardAssigneeId);
+      await ensureMassTasksForUser(boardAssigneeId);
       where.assigneeId = boardAssigneeId;
+
+      const todayStart = startOfToday();
+      where.AND = [
+        {
+          OR: [
+            { status: { in: ['PENDING', 'IN_PROGRESS'] } },
+            { closedAt: { gte: todayStart } },
+          ],
+        },
+      ];
     } else {
       if (assigneeId) {
         where.assigneeId = assigneeId as string;
@@ -31,7 +170,6 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
         where.creatorId = creatorId as string;
       }
 
-      // Менеджеры видят свои задачи (как созданные, так и назначенные)
       if (req.userRole === 'SALES_MANAGER') {
         where.OR = [
           { assigneeId: req.userId },
@@ -41,65 +179,39 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
     }
 
     if (priority) {
-      where.priority = parseInt(priority as string);
+      where.priority = parseInt(priority as string, 10);
     }
 
-    // Фильтр по дате выполнения
     if (dueDate === 'today') {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      const today = startOfToday();
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
-      where.dueDate = {
-        gte: today,
-        lt: tomorrow,
-      };
+      where.dueDate = { gte: today, lt: tomorrow };
     } else if (dueDate === 'overdue') {
-      where.dueDate = {
-        lt: new Date(),
-      };
-      where.status = {
-        not: 'COMPLETED',
-      };
+      where.dueDate = { lt: new Date() };
+      where.status = { not: 'COMPLETED' };
     }
 
     const tasks = await prisma.task.findMany({
       where,
       include: {
         creator: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
+          select: { id: true, firstName: true, lastName: true },
         },
         assignee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
+          select: { id: true, firstName: true, lastName: true },
+        },
+        massTemplate: {
+          select: { id: true, linkPath: true },
         },
         lead: {
           include: {
-            client: {
-              select: {
-                id: true,
-                name: true,
-                phone: true,
-              },
-            },
+            client: { select: { id: true, name: true, phone: true } },
           },
         },
         order: {
           include: {
-            client: {
-              select: {
-                id: true,
-                name: true,
-                phone: true,
-              },
-            },
+            client: { select: { id: true, name: true, phone: true } },
           },
         },
       },
@@ -132,6 +244,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
         priority: true,
         dueDate: true,
         completedAt: true,
+        closedAt: true,
         createdAt: true,
         updatedAt: true,
         creatorId: true,
@@ -139,21 +252,13 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
         leadId: true,
         orderId: true,
         systemKey: true,
+        massTemplateId: true,
+        massTemplate: { select: { linkPath: true } },
         creator: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
+          select: { id: true, firstName: true, lastName: true, email: true },
         },
         assignee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
+          select: { id: true, firstName: true, lastName: true, email: true },
         },
         comments: {
           select: {
@@ -163,11 +268,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
             updatedAt: true,
             userId: true,
             user: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-              },
+              select: { id: true, firstName: true, lastName: true },
             },
           },
           orderBy: { createdAt: 'desc' },
@@ -201,47 +302,27 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         description,
         priority: priority || 0,
         creatorId: req.userId!,
-        assigneeId: assigneeId || req.userId, // Если не указан исполнитель, задача себе
+        assigneeId: assigneeId || req.userId,
         dueDate: dueDate ? new Date(dueDate) : null,
         leadId,
         orderId,
       },
       include: {
-        creator: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        assignee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
+        creator: { select: { id: true, firstName: true, lastName: true } },
+        assignee: { select: { id: true, firstName: true, lastName: true } },
       },
     });
 
-    // Уведомление исполнителю
     const targetUserId = assigneeId || req.userId;
-    if (targetUserId && targetUserId !== req.userId) {
+    if (targetUserId) {
       await sendNotification(
         targetUserId,
         'Новая задача',
-        `Вам назначена задача: ${title}`,
+        targetUserId === req.userId
+          ? `Вы создали задачу: ${title}`
+          : `Вам назначена задача: ${title}`,
         'task',
-        `/tasks/${task.id}`
-      );
-    } else if (targetUserId === req.userId) {
-      // Уведомление создателю, если он сам себе назначил задачу
-      await sendNotification(
-        req.userId!,
-        'Новая задача',
-        `Вы создали задачу: ${title}`,
-        'task',
-        `/tasks/${task.id}`
+        '/work-tasks',
       );
     }
 
@@ -258,34 +339,20 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
     const { id } = req.params;
     const { title, description, status, priority, assigneeId, dueDate } = req.body;
 
-    const existingTask = await prisma.task.findUnique({
-      where: { id },
-    });
+    const existingTask = await prisma.task.findUnique({ where: { id } });
 
     if (!existingTask) {
       return res.status(404).json({ error: 'Задача не найдена' });
     }
 
-    // Проверка прав доступа
-    if (
-      req.userRole === 'SALES_MANAGER' &&
-      existingTask.creatorId !== req.userId &&
-      existingTask.assigneeId !== req.userId
-    ) {
+    if (!canModifyTask(req, existingTask)) {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 
-    const updateData: any = {};
+    const updateData: Record<string, unknown> = {};
     if (title !== undefined) updateData.title = title;
     if (description !== undefined) updateData.description = description;
-    if (status !== undefined) {
-      updateData.status = status;
-      if (status === 'COMPLETED') {
-        updateData.completedAt = new Date();
-      } else if (status !== 'COMPLETED' && existingTask.completedAt) {
-        updateData.completedAt = null;
-      }
-    }
+    applyClosedAtOnStatusChange(status, existingTask, updateData);
     if (priority !== undefined) updateData.priority = priority;
     if (assigneeId !== undefined) updateData.assigneeId = assigneeId;
     if (dueDate !== undefined) updateData.dueDate = dueDate ? new Date(dueDate) : null;
@@ -294,42 +361,29 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
       where: { id },
       data: updateData,
       include: {
-        creator: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        assignee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
+        creator: { select: { id: true, firstName: true, lastName: true } },
+        assignee: { select: { id: true, firstName: true, lastName: true } },
+        massTemplate: { select: { id: true, linkPath: true } },
       },
     });
 
-    // Уведомление при смене исполнителя
     if (assigneeId && assigneeId !== existingTask.assigneeId && assigneeId !== req.userId) {
       await sendNotification(
         assigneeId,
         'Новая задача',
         `Вам назначена задача: ${task.title}`,
         'task',
-        `/tasks/${task.id}`
+        '/work-tasks',
       );
     }
 
-    // Уведомление создателю при завершении задачи
     if (status === 'COMPLETED' && task.creatorId !== req.userId) {
       await sendNotification(
         task.creatorId,
         'Задача выполнена',
         `Задача "${task.title}" выполнена`,
         'task',
-        `/tasks/${task.id}`
+        `/tasks/${task.id}`,
       );
     }
 
@@ -345,22 +399,17 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
 
-    const task = await prisma.task.findUnique({
-      where: { id },
-    });
+    const task = await prisma.task.findUnique({ where: { id } });
 
     if (!task) {
       return res.status(404).json({ error: 'Задача не найдена' });
     }
 
-    // Только создатель может удалить задачу
-    if (task.creatorId !== req.userId && req.userRole !== 'ADMIN') {
+    if (!isTaskPrivilegedRole(req.userRole) && task.creatorId !== req.userId) {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 
-    await prisma.task.delete({
-      where: { id },
-    });
+    await prisma.task.delete({ where: { id } });
 
     res.json({ message: 'Задача удалена' });
   } catch (error) {
@@ -374,33 +423,20 @@ router.get('/:id/comments', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
 
-    const task = await prisma.task.findUnique({
-      where: { id },
-    });
+    const task = await prisma.task.findUnique({ where: { id } });
 
     if (!task) {
       return res.status(404).json({ error: 'Задача не найдена' });
     }
 
-    // Проверка прав доступа
-    if (
-      req.userRole === 'SALES_MANAGER' &&
-      task.creatorId !== req.userId &&
-      task.assigneeId !== req.userId
-    ) {
+    if (!canModifyTask(req, task)) {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 
     const comments = await prisma.comment.findMany({
       where: { taskId: id },
       include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
+        user: { select: { id: true, firstName: true, lastName: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -422,20 +458,13 @@ router.post('/:id/comments', authenticate, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Содержимое комментария обязательно' });
     }
 
-    const task = await prisma.task.findUnique({
-      where: { id },
-    });
+    const task = await prisma.task.findUnique({ where: { id } });
 
     if (!task) {
       return res.status(404).json({ error: 'Задача не найдена' });
     }
 
-    // Проверка прав доступа
-    if (
-      req.userRole === 'SALES_MANAGER' &&
-      task.creatorId !== req.userId &&
-      task.assigneeId !== req.userId
-    ) {
+    if (!canModifyTask(req, task)) {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 
@@ -446,13 +475,7 @@ router.post('/:id/comments', authenticate, async (req: AuthRequest, res) => {
         taskId: id,
       },
       include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
+        user: { select: { id: true, firstName: true, lastName: true } },
       },
     });
 
