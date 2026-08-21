@@ -9,6 +9,7 @@ import {
   SALES_REPORT_CHANNEL_GROUPS,
   SALES_REPORT_CHANNELS,
   SALES_REPORT_CHANNEL_LABELS,
+  SALES_REPORT_CHANNELS_IN_DEVELOPMENT,
   formatDateRu,
   formatPeriodLabel,
   getCurrentMonthInput,
@@ -719,13 +720,23 @@ export default function SalesReportPage() {
                       const entry = formEntries[idx]
                       if (!entry) return null
                       const displayLabel = SALES_REPORT_CHANNEL_LABELS[chId]
+                      const inDevelopment = SALES_REPORT_CHANNELS_IN_DEVELOPMENT.includes(chId)
                       return (
                         <div
                           key={chId}
-                          className="grid grid-cols-[1fr_repeat(3,minmax(0,5.25rem))] gap-2 items-center rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2"
+                          className={`grid grid-cols-[1fr_repeat(3,minmax(0,5.25rem))] gap-2 items-center rounded-xl border px-3 py-2 ${
+                            inDevelopment
+                              ? 'border-red-200 bg-red-50/60'
+                              : 'border-gray-100 bg-gray-50/80'
+                          }`}
                         >
-                          <span className="text-sm font-medium text-gray-800 truncate">
+                          <span
+                            className={`text-sm font-medium truncate ${
+                              inDevelopment ? 'text-red-600' : 'text-gray-800'
+                            }`}
+                          >
                             {displayLabel}
+                            {inDevelopment ? ' (пока в разработке)' : ''}
                           </span>
                           <input
                             type="number"

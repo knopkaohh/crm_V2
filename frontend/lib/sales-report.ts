@@ -22,6 +22,13 @@ export const SALES_REPORT_CHANNEL_LABELS: Record<SalesReportChannelId, string> =
   CLIENT_BASE_CROSS_SELL: 'Cross-sell',
 }
 
+/** Каналы с заглушкой в форме дневного отчёта */
+export const SALES_REPORT_CHANNELS_IN_DEVELOPMENT: SalesReportChannelId[] = [
+  'CLIENT_BASE_NEW',
+  'CLIENT_BASE_REGULAR',
+  'CLIENT_BASE_LOST',
+]
+
 export const SALES_REPORT_CHANNEL_GROUPS = [
   {
     title: 'Входящие заявки',
