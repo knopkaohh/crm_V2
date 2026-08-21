@@ -19,6 +19,8 @@ import {
   Trash2,
   ExternalLink,
   BarChart3,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 
 interface ManagerUser {
@@ -34,6 +36,7 @@ interface MassTemplate {
   priority: number
   systemKey: string
   weekdays: number
+  isOneTime: boolean
   isActive: boolean
   linkPath: string | null
   managerIds: string[]
@@ -108,6 +111,7 @@ const emptyMassForm = {
   priority: '1',
   systemKey: '',
   weekdays: 31,
+  isOneTime: false,
   isActive: true,
   linkPath: '',
   managerIds: [] as string[],
@@ -118,8 +122,8 @@ function isPrivileged(user: User | null) {
 }
 
 function getTaskLink(task: WorkTask): string | null {
+  if (task.systemKey === 'daily_sales_report') return null
   if (task.massTemplate?.linkPath) return task.massTemplate.linkPath
-  if (task.systemKey === 'daily_sales_report') return '/sales-report'
   return null
 }
 
@@ -145,6 +149,7 @@ export default function WorkTasksPage() {
   const [statsPeriod, setStatsPeriod] = useState(getCurrentMonthInput())
   const [stats, setStats] = useState<ManagerStats[]>([])
   const [statsLoading, setStatsLoading] = useState(false)
+  const [statsOpen, setStatsOpen] = useState(false)
 
   const [massModalOpen, setMassModalOpen] = useState(false)
   const [massTemplates, setMassTemplates] = useState<MassTemplate[]>([])
@@ -216,8 +221,9 @@ export default function WorkTasksPage() {
   }, [loadTasks, selectedAssigneeId])
 
   useEffect(() => {
-    if (currentUser) void loadStats()
-  }, [loadStats, currentUser])
+    if (!currentUser || !statsOpen) return
+    void loadStats()
+  }, [loadStats, currentUser, statsOpen])
 
   const groupedTasks = useMemo(() => {
     return tasks.reduce(
@@ -353,6 +359,7 @@ export default function WorkTasksPage() {
       priority: String(tpl.priority),
       systemKey: tpl.systemKey,
       weekdays: tpl.weekdays,
+      isOneTime: tpl.isOneTime,
       isActive: tpl.isActive,
       linkPath: tpl.linkPath ?? '',
       managerIds: [...tpl.managerIds],
@@ -392,6 +399,7 @@ export default function WorkTasksPage() {
         priority: parseInt(massForm.priority, 10) || 1,
         systemKey: massForm.systemKey.trim(),
         weekdays: massForm.weekdays,
+        isOneTime: massForm.isOneTime,
         isActive: massForm.isActive,
         linkPath: massForm.linkPath.trim() || null,
         managerIds: massForm.managerIds,
@@ -507,21 +515,34 @@ export default function WorkTasksPage() {
           </p>
         )}
 
-        {/* Статистика */}
+        {/* Статистика (раскрывается по кнопке) */}
         <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 bg-gray-50/80">
+          <button
+            type="button"
+            onClick={() => setStatsOpen((v) => !v)}
+            className="w-full flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 bg-gray-50/80 hover:bg-gray-100/80 transition-colors text-left"
+          >
             <div className="flex items-center gap-2">
+              {statsOpen ? (
+                <ChevronDown className="h-5 w-5 text-gray-500" />
+              ) : (
+                <ChevronRight className="h-5 w-5 text-gray-500" />
+              )}
               <BarChart3 className="h-5 w-5 text-primary-600" />
               <h2 className="font-semibold text-gray-900">Статистика задач</h2>
             </div>
-            <input
-              type="month"
-              value={statsPeriod}
-              onChange={(e) => setStatsPeriod(e.target.value)}
-              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5"
-            />
-          </div>
+            <span className="text-xs text-gray-500">{statsOpen ? 'Скрыть' : 'Показать'}</span>
+          </button>
+          {statsOpen && (
           <div className="p-4">
+            <div className="flex justify-end mb-3">
+              <input
+                type="month"
+                value={statsPeriod}
+                onChange={(e) => setStatsPeriod(e.target.value)}
+                className="text-sm border border-gray-300 rounded-lg px-3 py-1.5"
+              />
+            </div>
             {statsLoading ? (
               <div className="flex justify-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
@@ -562,6 +583,7 @@ export default function WorkTasksPage() {
               Период: {formatPeriodLabel(statsPeriod)}. Учитываются завершённые и отклонённые задачи по дате закрытия.
             </p>
           </div>
+          )}
         </div>
 
         {loading ? (
@@ -654,6 +676,18 @@ export default function WorkTasksPage() {
                                 {getTaskTypeLabel(task)}
                               </span>
                               <div className="flex items-center gap-2">
+                                {task.systemKey === 'daily_sales_report' && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      router.push('/sales-report?addReport=1')
+                                    }}
+                                    className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700"
+                                  >
+                                    Добавить отчет
+                                  </button>
+                                )}
                                 {taskLink && (
                                   <button
                                     type="button"
@@ -796,7 +830,9 @@ export default function WorkTasksPage() {
                     <div className="min-w-0">
                       <p className="font-medium text-sm text-gray-900 truncate">{tpl.title}</p>
                       <p className="text-xs text-gray-500">
-                        {tpl.isActive ? 'Активна' : 'Выключена'} · менеджеров: {tpl.managerIds.length}
+                        {tpl.isActive ? 'Активна' : 'Выключена'}
+                        {tpl.isOneTime ? ' · единоразовая' : ''}
+                        · менеджеров: {tpl.managerIds.length}
                       </p>
                     </div>
                     <div className="flex gap-2 shrink-0">
@@ -861,17 +897,39 @@ export default function WorkTasksPage() {
                       <button
                         key={bit}
                         type="button"
+                        disabled={massForm.isOneTime}
                         onClick={() => toggleMassWeekday(bit)}
                         className={`px-3 py-1 rounded-lg text-xs font-medium border ${
                           massForm.weekdays & bit
                             ? 'bg-primary-600 text-white border-primary-600'
                             : 'bg-white text-gray-700 border-gray-300'
-                        }`}
+                        } ${massForm.isOneTime ? 'opacity-40 cursor-not-allowed' : ''}`}
                       >
                         {label}
                       </button>
                     ))}
                   </div>
+                  {massForm.isOneTime && (
+                    <p className="text-xs text-gray-500 mt-1">Для единоразовой задачи дни не используются</p>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-4">
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={massForm.isOneTime}
+                      onChange={(e) => setMassForm({ ...massForm, isOneTime: e.target.checked })}
+                    />
+                    Единоразовая задача
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={massForm.isActive}
+                      onChange={(e) => setMassForm({ ...massForm, isActive: e.target.checked })}
+                    />
+                    Шаблон активен
+                  </label>
                 </div>
                 <div>
                   <p className="text-xs font-medium text-gray-600 mb-2">Менеджеры</p>
@@ -888,14 +946,6 @@ export default function WorkTasksPage() {
                     ))}
                   </div>
                 </div>
-                <label className="flex items-center gap-2 text-sm text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={massForm.isActive}
-                    onChange={(e) => setMassForm({ ...massForm, isActive: e.target.checked })}
-                  />
-                  Шаблон активен
-                </label>
                 <div className="flex gap-2">
                   <button
                     type="button"

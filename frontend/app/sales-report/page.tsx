@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState, Fragment } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
 import { auth, type User } from '@/lib/auth'
@@ -99,6 +100,8 @@ function emptyFormEntries(): FormEntry[] {
 }
 
 export default function SalesReportPage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [participants, setParticipants] = useState<Participant[]>([])
   const [selectedPeriod, setSelectedPeriod] = useState(getCurrentMonthInput())
@@ -197,6 +200,15 @@ export default function SalesReportPage() {
       setReportFormMode('fill-today')
     }
   }
+
+  useEffect(() => {
+    if (searchParams.get('addReport') !== '1') return
+    if (!currentUser) return
+    if (!isParticipant) return
+
+    void openReportModal()
+    router.replace('/sales-report', { scroll: false })
+  }, [searchParams, currentUser, isParticipant, router])
 
   const switchReportForm = async (date: string, mode: ReportFormMode) => {
     setReportDate(date)

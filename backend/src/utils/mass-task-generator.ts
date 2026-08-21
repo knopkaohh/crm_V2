@@ -111,19 +111,28 @@ export async function ensureMassTasksForUser(assigneeId: string): Promise<void> 
   });
 
   for (const template of templates) {
-    if (!matchesWeekdaysMask(template.weekdays)) continue;
+    if (template.isOneTime) {
+      const existingOneTime = await prisma.task.findFirst({
+        where: {
+          assigneeId,
+          systemKey: template.systemKey,
+        },
+      });
+      if (existingOneTime) continue;
+    } else {
+      if (!matchesWeekdaysMask(template.weekdays)) continue;
 
-    const existing = await prisma.task.findFirst({
-      where: {
-        assigneeId,
-        systemKey: template.systemKey,
-        createdAt: { gte: today, lt: tomorrow },
-      },
-    });
+      const existingToday = await prisma.task.findFirst({
+        where: {
+          assigneeId,
+          systemKey: template.systemKey,
+          createdAt: { gte: today, lt: tomorrow },
+        },
+      });
+      if (existingToday) continue;
+    }
 
-    if (existing) continue;
-
-    const task = await prisma.task.create({
+    await prisma.task.create({
       data: {
         title: template.title,
         description: template.description ?? 'Автоматическая задача на сегодня',
@@ -144,5 +153,11 @@ export async function ensureMassTasksForUser(assigneeId: string): Promise<void> 
       'task',
       `/work-tasks`,
     );
+  }
+}
+
+export async function ensureMassTasksForManagers(managerIds: string[]): Promise<void> {
+  for (const managerId of managerIds) {
+    await ensureMassTasksForUser(managerId);
   }
 }

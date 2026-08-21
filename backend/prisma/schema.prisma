@@ -385,6 +385,7 @@ model MassTaskTemplate {
   priority    Int      @default(1)
   systemKey   String   @unique
   weekdays    Int      // битовая маска: Пн=1, Вт=2, Ср=4, Чт=8, Пт=16, Сб=32, Вс=64
+  isOneTime   Boolean  @default(false) // единоразовая — одна задача на менеджера всего
   isActive    Boolean  @default(true)
   linkPath    String?
   createdById String
