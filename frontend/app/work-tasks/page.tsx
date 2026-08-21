@@ -36,7 +36,6 @@ interface MassTemplate {
   priority: number
   systemKey: string
   weekdays: number
-  isOneTime: boolean
   isActive: boolean
   linkPath: string | null
   managerIds: string[]
@@ -111,9 +110,16 @@ const emptyMassForm = {
   priority: '1',
   systemKey: '',
   weekdays: 31,
-  isOneTime: false,
   isActive: true,
   linkPath: '',
+  managerIds: [] as string[],
+}
+
+const emptyBulkForm = {
+  title: '',
+  description: '',
+  priority: '1',
+  dueDate: '',
   managerIds: [] as string[],
 }
 
@@ -155,6 +161,8 @@ export default function WorkTasksPage() {
   const [massTemplates, setMassTemplates] = useState<MassTemplate[]>([])
   const [massForm, setMassForm] = useState(emptyMassForm)
   const [massSaving, setMassSaving] = useState(false)
+  const [bulkForm, setBulkForm] = useState(emptyBulkForm)
+  const [bulkSending, setBulkSending] = useState(false)
 
   const privileged = isPrivileged(currentUser)
 
@@ -359,7 +367,6 @@ export default function WorkTasksPage() {
       priority: String(tpl.priority),
       systemKey: tpl.systemKey,
       weekdays: tpl.weekdays,
-      isOneTime: tpl.isOneTime,
       isActive: tpl.isActive,
       linkPath: tpl.linkPath ?? '',
       managerIds: [...tpl.managerIds],
@@ -382,6 +389,45 @@ export default function WorkTasksPage() {
     }))
   }
 
+  const toggleBulkManager = (managerId: string) => {
+    setBulkForm((prev) => ({
+      ...prev,
+      managerIds: prev.managerIds.includes(managerId)
+        ? prev.managerIds.filter((id) => id !== managerId)
+        : [...prev.managerIds, managerId],
+    }))
+  }
+
+  const sendBulkTasks = async () => {
+    if (!bulkForm.title.trim()) {
+      alert('Укажите название задачи')
+      return
+    }
+    if (bulkForm.managerIds.length === 0) {
+      alert('Выберите хотя бы одного получателя')
+      return
+    }
+    setBulkSending(true)
+    try {
+      const res = await api.post('/tasks/bulk', {
+        title: bulkForm.title.trim(),
+        description: bulkForm.description.trim() || undefined,
+        priority: parseInt(bulkForm.priority, 10) || 1,
+        dueDate: bulkForm.dueDate || undefined,
+        assigneeIds: bulkForm.managerIds,
+      })
+      const count = res.data?.created ?? bulkForm.managerIds.length
+      setBulkForm(emptyBulkForm)
+      alert(`Задача отправлена ${count} пользователям`)
+      if (selectedAssigneeId) await loadTasks()
+    } catch (error: unknown) {
+      const ax = error as { response?: { data?: { error?: string } } }
+      alert(ax.response?.data?.error || 'Не удалось отправить задачи')
+    } finally {
+      setBulkSending(false)
+    }
+  }
+
   const saveMassTemplate = async () => {
     if (!massForm.title.trim() || !massForm.systemKey.trim()) {
       alert('Укажите название и системный ключ')
@@ -399,7 +445,6 @@ export default function WorkTasksPage() {
         priority: parseInt(massForm.priority, 10) || 1,
         systemKey: massForm.systemKey.trim(),
         weekdays: massForm.weekdays,
-        isOneTime: massForm.isOneTime,
         isActive: massForm.isActive,
         linkPath: massForm.linkPath.trim() || null,
         managerIds: massForm.managerIds,
@@ -821,6 +866,71 @@ export default function WorkTasksPage() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+              <div className="rounded-xl border border-primary-200 bg-primary-50/40 p-4 space-y-3">
+                <h3 className="text-sm font-semibold text-gray-900">Единоразовая задача</h3>
+                <p className="text-xs text-gray-600">
+                  Задача будет создана для выбранных пользователей один раз, без шаблона.
+                </p>
+                <input
+                  type="text"
+                  placeholder="Название"
+                  value={bulkForm.title}
+                  onChange={(e) => setBulkForm({ ...bulkForm, title: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                />
+                <textarea
+                  placeholder="Описание"
+                  value={bulkForm.description}
+                  onChange={(e) => setBulkForm({ ...bulkForm, description: e.target.value })}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <select
+                    value={bulkForm.priority}
+                    onChange={(e) => setBulkForm({ ...bulkForm, priority: e.target.value })}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                  >
+                    <option value="0">Низкая</option>
+                    <option value="1">Средняя</option>
+                    <option value="2">Высокая</option>
+                  </select>
+                  <input
+                    type="datetime-local"
+                    value={bulkForm.dueDate}
+                    onChange={(e) => setBulkForm({ ...bulkForm, dueDate: e.target.value })}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-600 mb-2">Получатели</p>
+                  <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto">
+                    {users.map((u) => (
+                      <label key={u.id} className="flex items-center gap-2 text-sm text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={bulkForm.managerIds.includes(u.id)}
+                          onChange={() => toggleBulkManager(u.id)}
+                        />
+                        {u.firstName} {u.lastName}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={bulkSending}
+                  onClick={() => void sendBulkTasks()}
+                  className="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                >
+                  {bulkSending ? 'Отправка...' : 'Отправить'}
+                </button>
+              </div>
+
+              <div className="border-t border-gray-100 pt-4">
+                <h3 className="text-sm font-semibold text-gray-800 mb-3">Повторяющиеся шаблоны</h3>
+              </div>
+
               <div className="space-y-2">
                 {massTemplates.map((tpl) => (
                   <div
@@ -831,7 +941,6 @@ export default function WorkTasksPage() {
                       <p className="font-medium text-sm text-gray-900 truncate">{tpl.title}</p>
                       <p className="text-xs text-gray-500">
                         {tpl.isActive ? 'Активна' : 'Выключена'}
-                        {tpl.isOneTime ? ' · единоразовая' : ''}
                         · менеджеров: {tpl.managerIds.length}
                       </p>
                     </div>
@@ -857,7 +966,7 @@ export default function WorkTasksPage() {
 
               <div className="rounded-xl border border-gray-200 p-4 space-y-3">
                 <h3 className="text-sm font-semibold text-gray-800">
-                  {massForm.id ? 'Редактировать шаблон' : 'Новый шаблон'}
+                  {massForm.id ? 'Редактировать шаблон' : 'Новый повторяющийся шаблон'}
                 </h3>
                 <input
                   type="text"
@@ -897,40 +1006,26 @@ export default function WorkTasksPage() {
                       <button
                         key={bit}
                         type="button"
-                        disabled={massForm.isOneTime}
                         onClick={() => toggleMassWeekday(bit)}
                         className={`px-3 py-1 rounded-lg text-xs font-medium border ${
                           massForm.weekdays & bit
                             ? 'bg-primary-600 text-white border-primary-600'
                             : 'bg-white text-gray-700 border-gray-300'
-                        } ${massForm.isOneTime ? 'opacity-40 cursor-not-allowed' : ''}`}
+                        }`}
                       >
                         {label}
                       </button>
                     ))}
                   </div>
-                  {massForm.isOneTime && (
-                    <p className="text-xs text-gray-500 mt-1">Для единоразовой задачи дни не используются</p>
-                  )}
                 </div>
-                <div className="flex flex-wrap gap-4">
-                  <label className="flex items-center gap-2 text-sm text-gray-700">
-                    <input
-                      type="checkbox"
-                      checked={massForm.isOneTime}
-                      onChange={(e) => setMassForm({ ...massForm, isOneTime: e.target.checked })}
-                    />
-                    Единоразовая задача
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-gray-700">
-                    <input
-                      type="checkbox"
-                      checked={massForm.isActive}
-                      onChange={(e) => setMassForm({ ...massForm, isActive: e.target.checked })}
-                    />
-                    Шаблон активен
-                  </label>
-                </div>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={massForm.isActive}
+                    onChange={(e) => setMassForm({ ...massForm, isActive: e.target.checked })}
+                  />
+                  Шаблон активен
+                </label>
                 <div>
                   <p className="text-xs font-medium text-gray-600 mb-2">Менеджеры</p>
                   <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">

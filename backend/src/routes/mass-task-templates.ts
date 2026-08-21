@@ -32,7 +32,6 @@ router.get('/', authenticate, requireRole('ADMIN', 'EXECUTIVE'), async (req: Aut
         priority: t.priority,
         systemKey: t.systemKey,
         weekdays: t.weekdays,
-        isOneTime: t.isOneTime,
         isActive: t.isActive,
         linkPath: t.linkPath,
         managerIds: t.managers.map((m) => m.managerId),
@@ -54,7 +53,6 @@ router.post('/', authenticate, requireRole('ADMIN', 'EXECUTIVE'), async (req: Au
       priority,
       systemKey,
       weekdays,
-      isOneTime,
       isActive,
       linkPath,
       managerIds,
@@ -64,7 +62,6 @@ router.post('/', authenticate, requireRole('ADMIN', 'EXECUTIVE'), async (req: Au
       priority?: number;
       systemKey?: string;
       weekdays?: number;
-      isOneTime?: boolean;
       isActive?: boolean;
       linkPath?: string | null;
       managerIds?: string[];
@@ -94,7 +91,6 @@ router.post('/', authenticate, requireRole('ADMIN', 'EXECUTIVE'), async (req: Au
         priority: Math.min(2, Math.max(0, Number(priority ?? 1))),
         systemKey: systemKey.trim(),
         weekdays: Number(weekdays ?? DEFAULT_WEEKDAYS_MON_FRI),
-        isOneTime: Boolean(isOneTime),
         isActive: isActive ?? true,
         linkPath: linkPath?.trim() || null,
         createdById: req.userId!,
@@ -116,7 +112,6 @@ router.post('/', authenticate, requireRole('ADMIN', 'EXECUTIVE'), async (req: Au
       priority: template.priority,
       systemKey: template.systemKey,
       weekdays: template.weekdays,
-      isOneTime: template.isOneTime,
       isActive: template.isActive,
       linkPath: template.linkPath,
       managerIds: template.managers.map((m) => m.managerId),
@@ -139,7 +134,6 @@ router.put('/:id', authenticate, requireRole('ADMIN', 'EXECUTIVE'), async (req: 
       description,
       priority,
       weekdays,
-      isOneTime,
       isActive,
       linkPath,
       managerIds,
@@ -148,7 +142,6 @@ router.put('/:id', authenticate, requireRole('ADMIN', 'EXECUTIVE'), async (req: 
       description?: string;
       priority?: number;
       weekdays?: number;
-      isOneTime?: boolean;
       isActive?: boolean;
       linkPath?: string | null;
       managerIds?: string[];
@@ -164,7 +157,6 @@ router.put('/:id', authenticate, requireRole('ADMIN', 'EXECUTIVE'), async (req: 
     if (description !== undefined) data.description = description?.trim() || null;
     if (priority !== undefined) data.priority = Math.min(2, Math.max(0, Number(priority)));
     if (weekdays !== undefined) data.weekdays = Number(weekdays);
-    if (isOneTime !== undefined) data.isOneTime = Boolean(isOneTime);
     if (isActive !== undefined) data.isActive = Boolean(isActive);
     if (linkPath !== undefined) data.linkPath = linkPath?.trim() || null;
 
@@ -202,7 +194,6 @@ router.put('/:id', authenticate, requireRole('ADMIN', 'EXECUTIVE'), async (req: 
       priority: template!.priority,
       systemKey: template!.systemKey,
       weekdays: template!.weekdays,
-      isOneTime: template!.isOneTime,
       isActive: template!.isActive,
       linkPath: template!.linkPath,
       managerIds: template!.managers.map((m) => m.managerId),

@@ -111,26 +111,16 @@ export async function ensureMassTasksForUser(assigneeId: string): Promise<void> 
   });
 
   for (const template of templates) {
-    if (template.isOneTime) {
-      const existingOneTime = await prisma.task.findFirst({
-        where: {
-          assigneeId,
-          systemKey: template.systemKey,
-        },
-      });
-      if (existingOneTime) continue;
-    } else {
-      if (!matchesWeekdaysMask(template.weekdays)) continue;
+    if (!matchesWeekdaysMask(template.weekdays)) continue;
 
-      const existingToday = await prisma.task.findFirst({
-        where: {
-          assigneeId,
-          systemKey: template.systemKey,
-          createdAt: { gte: today, lt: tomorrow },
-        },
-      });
-      if (existingToday) continue;
-    }
+    const existingToday = await prisma.task.findFirst({
+      where: {
+        assigneeId,
+        systemKey: template.systemKey,
+        createdAt: { gte: today, lt: tomorrow },
+      },
+    });
+    if (existingToday) continue;
 
     await prisma.task.create({
       data: {

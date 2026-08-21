@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import { authenticate, AuthRequest, requireRole } from '../middleware/auth';
 import { ensureMassTasksForUser } from '../utils/mass-task-generator';
 import { getTaskBoardManagers } from '../utils/task-board-managers';
 import { isTaskPrivilegedRole } from '../utils/task-exclusions';
@@ -132,6 +132,72 @@ router.get('/stats', authenticate, async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Get task stats error:', error);
     res.status(500).json({ error: 'Ошибка при загрузке статистики' });
+  }
+});
+
+// Разовая массовая отправка задач (без шаблона)
+router.post('/bulk', authenticate, requireRole('ADMIN', 'EXECUTIVE'), async (req: AuthRequest, res) => {
+  try {
+    const { title, description, priority, dueDate, assigneeIds } = req.body as {
+      title?: string;
+      description?: string;
+      priority?: number;
+      dueDate?: string;
+      assigneeIds?: string[];
+    };
+
+    if (!title?.trim()) {
+      return res.status(400).json({ error: 'Укажите название задачи' });
+    }
+    if (!Array.isArray(assigneeIds) || assigneeIds.length === 0) {
+      return res.status(400).json({ error: 'Выберите хотя бы одного получателя' });
+    }
+
+    const allowedManagers = await getTaskBoardManagers();
+    const allowedIds = new Set(allowedManagers.map((m) => m.id));
+    const validAssigneeIds = assigneeIds.filter((id) => allowedIds.has(id));
+    if (validAssigneeIds.length === 0) {
+      return res.status(400).json({ error: 'Некорректный список получателей' });
+    }
+
+    const taskPriority = Math.min(2, Math.max(0, Number(priority ?? 1)));
+    const parsedDueDate = dueDate ? new Date(dueDate) : null;
+    const trimmedTitle = title.trim();
+    const trimmedDescription = description?.trim() || null;
+
+    const created = await prisma.$transaction(
+      validAssigneeIds.map((assigneeId) =>
+        prisma.task.create({
+          data: {
+            title: trimmedTitle,
+            description: trimmedDescription,
+            priority: taskPriority,
+            status: 'PENDING',
+            creatorId: req.userId!,
+            assigneeId,
+            dueDate: parsedDueDate,
+          },
+          select: { id: true, assigneeId: true, title: true },
+        }),
+      ),
+    );
+
+    for (const task of created) {
+      if (task.assigneeId && task.assigneeId !== req.userId) {
+        void sendNotification(
+          task.assigneeId,
+          'Новая задача',
+          `Вам назначена задача: ${task.title}`,
+          'task',
+          '/work-tasks',
+        );
+      }
+    }
+
+    res.status(201).json({ created: created.length, taskIds: created.map((t) => t.id) });
+  } catch (error) {
+    console.error('Bulk create tasks error:', error);
+    res.status(500).json({ error: 'Ошибка при отправке задач' });
   }
 });
 
