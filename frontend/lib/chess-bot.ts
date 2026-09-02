@@ -1,5 +1,8 @@
 import { Chess, type Move } from 'chess.js'
 
+const MATE = 100000
+const INF = MATE * 2
+
 const PIECE_VALUE: Record<string, number> = {
   p: 100,
   n: 320,
@@ -9,10 +12,9 @@ const PIECE_VALUE: Record<string, number> = {
   k: 0,
 }
 
-/** Упрощённые таблицы позиций (центр и развитие) */
 const PAWN_PST = [
   [0, 0, 0, 0, 0, 0, 0, 0],
-  [50, 50, 50, 50, 50, 50, 50, 50],
+  [80, 80, 80, 80, 80, 80, 80, 80],
   [10, 10, 20, 30, 30, 20, 10, 10],
   [5, 5, 10, 25, 25, 10, 5, 5],
   [0, 0, 0, 20, 20, 0, 0, 0],
@@ -65,7 +67,7 @@ const QUEEN_PST = [
   [-20, -10, -10, -5, -5, -10, -10, -20],
 ]
 
-const KING_PST_MID = [
+const KING_PST = [
   [-30, -40, -40, -50, -50, -40, -40, -30],
   [-30, -40, -40, -50, -50, -40, -40, -30],
   [-30, -40, -40, -50, -50, -40, -40, -30],
@@ -78,37 +80,22 @@ const KING_PST_MID = [
 
 function pstFor(type: string, color: 'w' | 'b', rank: number, file: number): number {
   const r = color === 'w' ? 7 - rank : rank
-  const c = file
-  let table: number[][]
-  switch (type) {
-    case 'p':
-      table = PAWN_PST
-      break
-    case 'n':
-      table = KNIGHT_PST
-      break
-    case 'b':
-      table = BISHOP_PST
-      break
-    case 'r':
-      table = ROOK_PST
-      break
-    case 'q':
-      table = QUEEN_PST
-      break
-    case 'k':
-      table = KING_PST_MID
-      break
-    default:
-      return 0
+  const tables: Record<string, number[][]> = {
+    p: PAWN_PST,
+    n: KNIGHT_PST,
+    b: BISHOP_PST,
+    r: ROOK_PST,
+    q: QUEEN_PST,
+    k: KING_PST,
   }
-  const val = table[r]?.[c] ?? 0
+  const val = tables[type]?.[r]?.[file] ?? 0
   return color === 'w' ? val : -val
 }
 
+/** Оценка с точки зрения белых (без случайного шума) */
 function evaluate(game: Chess): number {
   if (game.isCheckmate()) {
-    return game.turn() === 'w' ? -99999 : 99999
+    return game.turn() === 'w' ? -MATE : MATE
   }
   if (game.isDraw() || game.isStalemate()) return 0
 
@@ -124,32 +111,56 @@ function evaluate(game: Chess): number {
   }
 
   const mobility = game.moves().length
-  score += (game.turn() === 'w' ? 1 : -1) * mobility * 2
+  score += (game.turn() === 'w' ? 1 : -1) * mobility * 3
 
   if (game.isCheck()) {
-    score += game.turn() === 'w' ? -15 : 15
+    score += game.turn() === 'w' ? -25 : 25
   }
 
-  score += (Math.random() - 0.5) * 40
   return score
 }
 
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr]
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[a[i], a[j]] = [a[j], a[i]]
+function moveScore(move: Move): number {
+  let s = 0
+  if (move.captured) {
+    s += PIECE_VALUE[move.captured] * 10 - PIECE_VALUE[move.piece]
   }
-  return a
+  if (move.san.includes('+')) s += 50
+  if (move.san.includes('#')) s += 10000
+  return s
+}
+
+function orderMoves(moves: Move[]): Move[] {
+  return [...moves].sort((a, b) => moveScore(b) - moveScore(a))
+}
+
+function isNoisy(move: Move): boolean {
+  return Boolean(move.captured) || move.san.includes('+')
+}
+
+function quiescence(game: Chess, alpha: number, beta: number, depth: number): number {
+  const standPat = evaluate(game)
+  if (depth <= 0) return standPat
+  if (standPat >= beta) return beta
+  if (standPat > alpha) alpha = standPat
+
+  const moves = orderMoves(game.moves({ verbose: true })).filter(isNoisy)
+  for (const move of moves) {
+    game.move(move)
+    const score = -quiescence(game, -beta, -alpha, depth - 1)
+    game.undo()
+    if (score >= beta) return beta
+    if (score > alpha) alpha = score
+  }
+  return alpha
 }
 
 function negamax(game: Chess, depth: number, alpha: number, beta: number): number {
-  if (depth === 0 || game.isGameOver()) {
-    return evaluate(game)
-  }
+  if (game.isGameOver()) return evaluate(game)
+  if (depth === 0) return quiescence(game, alpha, beta, 5)
 
-  let best = -Infinity
-  const moves = shuffle(game.moves({ verbose: true }))
+  let best = -INF
+  const moves = orderMoves(game.moves({ verbose: true }))
 
   for (const move of moves) {
     game.move(move)
@@ -160,42 +171,58 @@ function negamax(game: Chess, depth: number, alpha: number, beta: number): numbe
     if (alpha >= beta) break
   }
 
-  return best
+  return best === -INF ? evaluate(game) : best
 }
 
-function searchBestMoves(game: Chess, depth: number): Move[] {
-  const moves = shuffle(game.moves({ verbose: true }))
-  if (moves.length === 0) return []
+interface ScoredMove {
+  move: Move
+  score: number
+}
 
-  let bestScore = -Infinity
-  let best: Move[] = []
+function scoreRootMoves(game: Chess, depth: number): ScoredMove[] {
+  const moves = orderMoves(game.moves({ verbose: true }))
+  const scored: ScoredMove[] = []
 
   for (const move of moves) {
     game.move(move)
-    const score = -negamax(game, depth - 1, -Infinity, Infinity)
+    const score = -negamax(game, depth - 1, -INF, INF)
     game.undo()
-
-    if (score > bestScore + 25) {
-      bestScore = score
-      best = [move]
-    } else if (Math.abs(score - bestScore) <= 25) {
-      best.push(move)
-    }
+    scored.push({ move, score })
   }
 
-  return best.length > 0 ? best : moves
+  scored.sort((a, b) => b.score - a.score)
+  return scored
 }
 
-/** Бот ~1200–1300 ELO: глубина 2, иногда ошибки и случайный выбор среди равных ходов */
+/**
+ * Бот ~1200–1250 ELO: поиск глубина 3 + quiescence,
+ * редкие неточности на корне (не случайные ходы).
+ */
 export function pickBotMove(game: Chess): Move | null {
   const moves = game.moves({ verbose: true })
   if (moves.length === 0) return null
 
-  if (Math.random() < 0.1) {
-    return moves[Math.floor(Math.random() * moves.length)]
+  const depth = game.moveNumber() <= 8 ? 3 : 4
+  const scored = scoreRootMoves(game, depth)
+  if (scored.length === 0) return null
+
+  const best = scored[0].score
+  const top = scored.filter((s) => s.score >= best - 35)
+  const decent = scored.filter((s) => s.score >= best - 90)
+
+  const roll = Math.random()
+
+  // ~3% — заметная ошибка (не лучший ход, но не заведомо проигрышный)
+  if (roll < 0.03 && decent.length > 2) {
+    const pool = decent.slice(Math.min(2, decent.length - 1))
+    return pool[Math.floor(Math.random() * pool.length)].move
   }
 
-  const depth = Math.random() < 0.2 ? 1 : 2
-  const candidates = searchBestMoves(game, depth)
-  return candidates[Math.floor(Math.random() * candidates.length)]
+  // ~12% — второй/третий по силе ход в пределах окна
+  if (roll < 0.15 && top.length > 1) {
+    return top[1 + Math.floor(Math.random() * Math.min(2, top.length - 1))].move
+  }
+
+  // Обычно лучший или один из топ-2 близких
+  return top[Math.floor(Math.random() * Math.min(2, top.length))].move
 }
