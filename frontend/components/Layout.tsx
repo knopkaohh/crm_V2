@@ -11,6 +11,7 @@ import {
   ShoppingCart,
   ClipboardList,
   Settings,
+  Crown,
   Bell,
   LogOut,
   Menu,
@@ -183,6 +184,7 @@ export default function Layout({ children }: LayoutProps) {
   ]
 
   if (user.role === 'ADMIN') {
+    menuItems.push({ href: '/chess', label: 'Шахматы', icon: Crown })
     menuItems.push({ href: '/admin', label: 'Админ-панель', icon: Settings })
   }
 
