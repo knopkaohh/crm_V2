@@ -674,21 +674,18 @@ export default function ProjectSalesPage() {
   return (
     <Layout>
       <div className="space-y-6">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <Kanban className="h-8 w-8 text-primary-600" />
-                <h1 className="text-3xl font-bold text-gray-900">
-                  {funnelMode === 'project' ? 'Проектные продажи' : 'Бренды на выезд'}
-                </h1>
-              </div>
-              <p className="text-gray-600 mt-1">Воронка брендов и ответственные менеджеры</p>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <Kanban className="h-8 w-8 text-primary-600" />
+              <h1 className="text-3xl font-bold text-gray-900">
+                {funnelMode === 'project' ? 'Проектные продажи' : 'Бренды на выезд'}
+              </h1>
             </div>
-          </div>
-          <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-            <FunnelModeToggle mode={funnelMode} onChange={setFunnelMode} />
-            <p className="text-center text-xs text-gray-400 mt-2">Свайп влево/вправо по доске — переключение воронки</p>
+            <p className="text-gray-600 mt-1">Воронка брендов и ответственные менеджеры</p>
+            <div className="mt-2.5">
+              <FunnelModeToggle mode={funnelMode} onChange={setFunnelMode} />
+            </div>
           </div>
         </div>
 
