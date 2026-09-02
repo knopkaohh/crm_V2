@@ -202,27 +202,26 @@ export function pickBotMove(game: Chess): Move | null {
   const moves = game.moves({ verbose: true })
   if (moves.length === 0) return null
 
-  const depth = game.moveNumber() <= 8 ? 3 : 4
+  const depth = game.moveNumber() <= 6 ? 3 : 4
   const scored = scoreRootMoves(game, depth)
   if (scored.length === 0) return null
 
   const best = scored[0].score
-  const top = scored.filter((s) => s.score >= best - 35)
-  const decent = scored.filter((s) => s.score >= best - 90)
+  const top = scored.filter((s) => s.score >= best - 25)
+  const decent = scored.filter((s) => s.score >= best - 70)
 
   const roll = Math.random()
 
-  // ~3% — заметная ошибка (не лучший ход, но не заведомо проигрышный)
-  if (roll < 0.03 && decent.length > 2) {
+  // ~2% — неточность
+  if (roll < 0.02 && decent.length > 2) {
     const pool = decent.slice(Math.min(2, decent.length - 1))
     return pool[Math.floor(Math.random() * pool.length)].move
   }
 
-  // ~12% — второй/третий по силе ход в пределах окна
-  if (roll < 0.15 && top.length > 1) {
-    return top[1 + Math.floor(Math.random() * Math.min(2, top.length - 1))].move
+  // ~8% — второй лучший ход
+  if (roll < 0.1 && top.length > 1) {
+    return top[1 + Math.floor(Math.random() * Math.min(1, top.length - 1))].move
   }
 
-  // Обычно лучший или один из топ-2 близких
-  return top[Math.floor(Math.random() * Math.min(2, top.length))].move
+  return top[0].move
 }

@@ -257,7 +257,7 @@ export default function ChessPage() {
             <Crown className="h-7 w-7 text-amber-500" />
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Шахматы</h1>
-              <p className="text-sm text-gray-500">Белые · против компьютера (~1250)</p>
+              <p className="text-sm text-gray-500">Белые · против компьютера (~1250) · сборка v2</p>
             </div>
           </div>
           <button
