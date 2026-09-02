@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import Layout from '@/components/Layout'
+import { FunnelModeToggle, type FunnelMode } from '@/components/FunnelModeToggle'
 import api from '@/lib/api'
 import { apiCache } from '@/lib/cache'
 import { auth, type User } from '@/lib/auth'
@@ -14,6 +15,12 @@ type ProjectSaleStage =
   | 'INTERESTED'
   | 'NOT_OUR_CLIENT'
   | 'ORDER_PLACED'
+
+type BrandVisitStage =
+  | 'NEW_BRANDS'
+  | 'MEETING_SCHEDULED'
+  | 'MEETING_COMPLETED'
+  | 'MEETING_FAILED'
 
 type ProjectSaleOrderKind = 'SAMPLES' | 'ORDER'
 
@@ -47,12 +54,34 @@ interface ProjectSaleRow {
   manager: ManagerUser
 }
 
-const STAGES: { id: ProjectSaleStage; label: string }[] = [
+interface BrandVisitRow {
+  id: string
+  stage: BrandVisitStage
+  createdAt: string
+  failureReason?: string | null
+  meetingNotes?: string | null
+  client: {
+    id: string
+    name: string
+    company: string | null
+    phone: string
+  }
+  manager: ManagerUser
+}
+
+const PROJECT_STAGES: { id: ProjectSaleStage; label: string }[] = [
   { id: 'NEW_BRANDS', label: 'Новые бренды' },
   { id: 'IN_PROGRESS', label: 'Бренды в работе' },
   { id: 'INTERESTED', label: 'Заинтересованные' },
   { id: 'ORDER_PLACED', label: 'Оформили заказ/Образец' },
   { id: 'NOT_OUR_CLIENT', label: 'Не наш клиент' },
+]
+
+const BRAND_VISIT_STAGES: { id: BrandVisitStage; label: string }[] = [
+  { id: 'NEW_BRANDS', label: 'Новые бренды' },
+  { id: 'MEETING_SCHEDULED', label: 'Договорился о встрече' },
+  { id: 'MEETING_COMPLETED', label: 'Встреча прошла' },
+  { id: 'MEETING_FAILED', label: 'Встреча не состоялась' },
 ]
 
 /** Совпадает с бэкендом: только эти менеджеры (порядок для сортировки, если API изменится) */
@@ -112,6 +141,27 @@ function getStageIndicator(stage: ProjectSaleStage): { border: string; bg: strin
   }
 }
 
+function getBrandVisitStageIndicator(stage: BrandVisitStage): { border: string; bg: string } {
+  switch (stage) {
+    case 'NEW_BRANDS':
+      return { border: 'border-l-blue-400', bg: 'bg-blue-50/40' }
+    case 'MEETING_SCHEDULED':
+      return { border: 'border-l-yellow-400', bg: 'bg-yellow-50/40' }
+    case 'MEETING_COMPLETED':
+      return { border: 'border-l-green-600', bg: 'bg-green-100/40' }
+    case 'MEETING_FAILED':
+      return { border: 'border-l-rose-400', bg: 'bg-rose-50/40' }
+    default:
+      return { border: 'border-l-gray-300', bg: 'bg-gray-50' }
+  }
+}
+
+function canActOnBrandVisit(row: BrandVisitRow, user: User | null): boolean {
+  if (!user) return false
+  if (user.role === 'ADMIN') return true
+  return row.manager.id === user.id
+}
+
 function canActOnSale(row: ProjectSaleRow, user: User | null): boolean {
   if (!user) return false
   if (user.role === 'ADMIN') return true
@@ -121,8 +171,10 @@ function canActOnSale(row: ProjectSaleRow, user: User | null): boolean {
 type RowDraft = { brandName: string; managerId: string }
 
 type DialogState =
-  | { kind: 'takeWork'; row: ProjectSaleRow }
+  | { kind: 'takeWork'; row: ProjectSaleRow; funnel: 'project' }
+  | { kind: 'takeWork'; row: BrandVisitRow; funnel: 'brandVisit' }
   | { kind: 'decline'; row: ProjectSaleRow }
+  | { kind: 'meetingFailed'; row: BrandVisitRow }
   | { kind: 'order'; row: ProjectSaleRow; orderKind: ProjectSaleOrderKind }
 
 function FunnelModalShell({
@@ -172,7 +224,9 @@ function FunnelModalShell({
 
 export default function ProjectSalesPage() {
   const router = useRouter()
-  const [items, setItems] = useState<ProjectSaleRow[]>([])
+  const [funnelMode, setFunnelMode] = useState<FunnelMode>('project')
+  const [projectItems, setProjectItems] = useState<ProjectSaleRow[]>([])
+  const [brandVisitItems, setBrandVisitItems] = useState<BrandVisitRow[]>([])
   const [managers, setManagers] = useState<ManagerUser[]>([])
   const [managerFilter, setManagerFilter] = useState<string>('ALL')
   const [loading, setLoading] = useState(true)
@@ -184,7 +238,8 @@ export default function ProjectSalesPage() {
   )
   const [batchSaving, setBatchSaving] = useState(false)
   const [dragId, setDragId] = useState<string | null>(null)
-  const [dragOverStage, setDragOverStage] = useState<ProjectSaleStage | null>(null)
+  const [dragOverStage, setDragOverStage] = useState<string | null>(null)
+  const touchStartX = useRef(0)
 
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [dialogVisible, setDialogVisible] = useState(false)
@@ -192,27 +247,39 @@ export default function ProjectSalesPage() {
 
   const [takeForm, setTakeForm] = useState({ fullName: '', phone: '', position: '', notes: '' })
   const [declineReason, setDeclineReason] = useState('')
+  const [meetingFailedReason, setMeetingFailedReason] = useState('')
   const [orderForm, setOrderForm] = useState({ brief: '' })
   const [orderFiles, setOrderFiles] = useState<File[]>([])
+
+  const apiBase = funnelMode === 'project' ? '/project-sales' : '/brand-visits'
+  const activeStages = funnelMode === 'project' ? PROJECT_STAGES : BRAND_VISIT_STAGES
+  const gridColsClass =
+    funnelMode === 'project'
+      ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5'
+      : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'
 
   const sortedManagers = useMemo(() => sortManagers(managers), [managers])
 
   const loadManagers = useCallback(async () => {
-    const res = await api.get('/project-sales/managers', {
+    const res = await api.get(`${apiBase}/managers`, {
       headers: { 'X-Skip-Cache': '1' },
     })
     setManagers(res.data as ManagerUser[])
-  }, [])
+  }, [apiBase])
 
-  const loadSales = useCallback(async () => {
+  const loadFunnel = useCallback(async () => {
     const params =
       managerFilter !== 'ALL' ? { managerId: managerFilter } : ({} as Record<string, string>)
-    const res = await api.get('/project-sales', {
+    const res = await api.get(apiBase, {
       params,
       headers: { 'X-Skip-Cache': '1' },
     })
-    setItems(res.data as ProjectSaleRow[])
-  }, [managerFilter])
+    if (funnelMode === 'project') {
+      setProjectItems(res.data as ProjectSaleRow[])
+    } else {
+      setBrandVisitItems(res.data as BrandVisitRow[])
+    }
+  }, [apiBase, funnelMode, managerFilter])
 
   const bootstrapDone = useRef(false)
 
@@ -236,7 +303,7 @@ export default function ProjectSalesPage() {
         }
       }
       try {
-        await loadSales()
+        await loadFunnel()
       } catch (e) {
         console.error(e)
       }
@@ -244,7 +311,13 @@ export default function ProjectSalesPage() {
     return () => {
       cancelled = true
     }
-  }, [loadManagers, loadSales])
+  }, [loadManagers, loadFunnel])
+
+  useEffect(() => {
+    if (!bootstrapDone.current) return
+    void loadFunnel()
+    void loadManagers()
+  }, [funnelMode, loadFunnel, loadManagers])
 
   useEffect(() => {
     if (!dialog) {
@@ -261,21 +334,32 @@ export default function ProjectSalesPage() {
       setDialog(null)
       setTakeForm({ fullName: '', phone: '', position: '', notes: '' })
       setDeclineReason('')
+      setMeetingFailedReason('')
       setOrderForm({ brief: '' })
       setOrderFiles([])
       setDialogBusy(false)
     }, 280)
   }
 
-  const byStage = useMemo(() => {
+  const projectByStage = useMemo(() => {
     const map = new Map<ProjectSaleStage, ProjectSaleRow[]>()
-    for (const s of STAGES) map.set(s.id, [])
-    for (const row of items) {
+    for (const s of PROJECT_STAGES) map.set(s.id, [])
+    for (const row of projectItems) {
       const list = map.get(row.stage)
       if (list) list.push(row)
     }
     return map
-  }, [items])
+  }, [projectItems])
+
+  const brandVisitByStage = useMemo(() => {
+    const map = new Map<BrandVisitStage, BrandVisitRow[]>()
+    for (const s of BRAND_VISIT_STAGES) map.set(s.id, [])
+    for (const row of brandVisitItems) {
+      const list = map.get(row.stage)
+      if (list) list.push(row)
+    }
+    return map
+  }, [brandVisitItems])
 
   const openModal = () => {
     setBatchRows(Array.from({ length: 5 }, () => ({ brandName: '', managerId: '' })))
@@ -305,10 +389,13 @@ export default function ProjectSalesPage() {
 
     setBatchSaving(true)
     try {
-      const res = await api.post('/project-sales/batch', { items: payload })
-      const created = res.data as ProjectSaleRow[]
-      apiCache.invalidatePattern('project-sales')
-      setItems((prev) => [...created, ...prev])
+      const res = await api.post(`${apiBase}/batch`, { items: payload })
+      apiCache.invalidatePattern(funnelMode === 'project' ? 'project-sales' : 'brand-visits')
+      if (funnelMode === 'project') {
+        setProjectItems((prev) => [...(res.data as ProjectSaleRow[]), ...prev])
+      } else {
+        setBrandVisitItems((prev) => [...(res.data as BrandVisitRow[]), ...prev])
+      }
       setModalOpen(false)
     } catch (err) {
       const msg =
@@ -321,13 +408,27 @@ export default function ProjectSalesPage() {
     }
   }
 
-  const mergeRow = (updated: ProjectSaleRow) => {
+  const mergeProjectRow = (updated: ProjectSaleRow) => {
     apiCache.invalidatePattern('project-sales')
-    setItems((list) => list.map((i) => (i.id === updated.id ? updated : i)))
+    setProjectItems((list) => list.map((i) => (i.id === updated.id ? updated : i)))
   }
 
-  const onDragStartCard = (e: React.DragEvent, row: ProjectSaleRow) => {
+  const mergeBrandVisitRow = (updated: BrandVisitRow) => {
+    apiCache.invalidatePattern('brand-visits')
+    setBrandVisitItems((list) => list.map((i) => (i.id === updated.id ? updated : i)))
+  }
+
+  const onDragStartProjectCard = (e: React.DragEvent, row: ProjectSaleRow) => {
     if (!canActOnSale(row, currentUser)) {
+      e.preventDefault()
+      return
+    }
+    setDragId(row.id)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const onDragStartBrandVisitCard = (e: React.DragEvent, row: BrandVisitRow) => {
+    if (!canActOnBrandVisit(row, currentUser)) {
       e.preventDefault()
       return
     }
@@ -340,7 +441,7 @@ export default function ProjectSalesPage() {
     setDragOverStage(null)
   }
 
-  const onDragOverColumn = (e: React.DragEvent, stage: ProjectSaleStage) => {
+  const onDragOverColumn = (e: React.DragEvent, stage: string) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
     setDragOverStage(stage)
@@ -350,12 +451,12 @@ export default function ProjectSalesPage() {
     setDragOverStage(null)
   }
 
-  const onDropColumn = async (e: React.DragEvent, stage: ProjectSaleStage) => {
+  const onDropProjectColumn = async (e: React.DragEvent, stage: ProjectSaleStage) => {
     e.preventDefault()
     setDragOverStage(null)
 
     if (!dragId) return
-    const prev = items.find((i) => i.id === dragId)
+    const prev = projectItems.find((i) => i.id === dragId)
     if (!prev || prev.stage === stage) {
       setDragId(null)
       return
@@ -367,8 +468,7 @@ export default function ProjectSalesPage() {
     }
     try {
       const res = await api.patch(`/project-sales/${dragId}/stage`, { stage })
-      const updated = res.data as ProjectSaleRow
-      mergeRow(updated)
+      mergeProjectRow(res.data as ProjectSaleRow)
     } catch (err: unknown) {
       console.error(err)
       const msg =
@@ -381,17 +481,67 @@ export default function ProjectSalesPage() {
     }
   }
 
+  const onDropBrandVisitColumn = async (e: React.DragEvent, stage: BrandVisitStage) => {
+    e.preventDefault()
+    setDragOverStage(null)
+
+    if (!dragId) return
+    const prev = brandVisitItems.find((i) => i.id === dragId)
+    if (!prev || prev.stage === stage) {
+      setDragId(null)
+      return
+    }
+    if (!canActOnBrandVisit(prev, currentUser)) {
+      setDragId(null)
+      alert('Недостаточно прав для перемещения этой карточки')
+      return
+    }
+    try {
+      const res = await api.patch(`/brand-visits/${dragId}/stage`, { stage })
+      mergeBrandVisitRow(res.data as BrandVisitRow)
+    } catch (err: unknown) {
+      console.error(err)
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : undefined
+      alert(msg || 'Не удалось переместить карточку')
+    } finally {
+      setDragId(null)
+    }
+  }
+
+  const onFunnelTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0]?.clientX ?? 0
+  }
+
+  const onFunnelTouchEnd = (e: React.TouchEvent) => {
+    const endX = e.changedTouches[0]?.clientX ?? 0
+    const diff = endX - touchStartX.current
+    if (Math.abs(diff) < 80) return
+    if (diff < 0 && funnelMode === 'project') setFunnelMode('brandVisit')
+    if (diff > 0 && funnelMode === 'brandVisit') setFunnelMode('project')
+  }
+
   const submitTakeWork = async () => {
     if (!dialog || dialog.kind !== 'takeWork') return
     setDialogBusy(true)
     try {
-      const res = await api.post(`/project-sales/${dialog.row.id}/take-in-work`, {
+      const endpoint =
+        dialog.funnel === 'project'
+          ? `/project-sales/${dialog.row.id}/take-in-work`
+          : `/brand-visits/${dialog.row.id}/take-in-work`
+      const res = await api.post(endpoint, {
         fullName: takeForm.fullName.trim(),
         phone: takeForm.phone.trim(),
         position: takeForm.position.trim(),
         notes: takeForm.notes.trim(),
       })
-      mergeRow(res.data as ProjectSaleRow)
+      if (dialog.funnel === 'project') {
+        mergeProjectRow(res.data as ProjectSaleRow)
+      } else {
+        mergeBrandVisitRow(res.data as BrandVisitRow)
+      }
       closeDialog()
     } catch (err: unknown) {
       const msg =
@@ -407,7 +557,7 @@ export default function ProjectSalesPage() {
   const submitInterested = async (row: ProjectSaleRow) => {
     try {
       const res = await api.post(`/project-sales/${row.id}/interested`)
-      mergeRow(res.data as ProjectSaleRow)
+      mergeProjectRow(res.data as ProjectSaleRow)
     } catch (err: unknown) {
       const msg =
         err && typeof err === 'object' && 'response' in err
@@ -424,7 +574,40 @@ export default function ProjectSalesPage() {
       const res = await api.post(`/project-sales/${dialog.row.id}/not-our-client`, {
         reason: declineReason.trim(),
       })
-      mergeRow(res.data as ProjectSaleRow)
+      mergeProjectRow(res.data as ProjectSaleRow)
+      closeDialog()
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response: { data: { error: string } } }).response.data.error
+          : 'Ошибка при сохранении'
+      alert(msg)
+    } finally {
+      setDialogBusy(false)
+    }
+  }
+
+  const submitMeetingCompleted = async (row: BrandVisitRow) => {
+    try {
+      const res = await api.post(`/brand-visits/${row.id}/meeting-completed`)
+      mergeBrandVisitRow(res.data as BrandVisitRow)
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response: { data: { error: string } } }).response.data.error
+          : 'Ошибка'
+      alert(msg)
+    }
+  }
+
+  const submitMeetingFailed = async () => {
+    if (!dialog || dialog.kind !== 'meetingFailed') return
+    setDialogBusy(true)
+    try {
+      const res = await api.post(`/brand-visits/${dialog.row.id}/meeting-failed`, {
+        reason: meetingFailedReason.trim(),
+      })
+      mergeBrandVisitRow(res.data as BrandVisitRow)
       closeDialog()
     } catch (err: unknown) {
       const msg =
@@ -448,7 +631,7 @@ export default function ProjectSalesPage() {
         fd.append('files', f)
       }
       const res = await api.post(`/project-sales/${dialog.row.id}/order-placement`, fd)
-      mergeRow(res.data as ProjectSaleRow)
+      mergeProjectRow(res.data as ProjectSaleRow)
       closeDialog()
     } catch (err: unknown) {
       const msg =
@@ -461,7 +644,8 @@ export default function ProjectSalesPage() {
     }
   }
 
-  const brandTitle = (row: ProjectSaleRow) => row.client.company?.trim() || row.client.name
+  const brandTitle = (row: { client: ProjectSaleRow['client'] }) =>
+    row.client.company?.trim() || row.client.name
 
   const downloadProjectFile = async (fileId: string, originalName: string) => {
     try {
@@ -490,13 +674,21 @@ export default function ProjectSalesPage() {
   return (
     <Layout>
       <div className="space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <Kanban className="h-8 w-8 text-primary-600" />
-              <h1 className="text-3xl font-bold text-gray-900">Проектные продажи</h1>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <Kanban className="h-8 w-8 text-primary-600" />
+                <h1 className="text-3xl font-bold text-gray-900">
+                  {funnelMode === 'project' ? 'Проектные продажи' : 'Бренды на выезд'}
+                </h1>
+              </div>
+              <p className="text-gray-600 mt-1">Воронка брендов и ответственные менеджеры</p>
             </div>
-            <p className="text-gray-600 mt-1">Воронка брендов и ответственные менеджеры</p>
+          </div>
+          <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+            <FunnelModeToggle mode={funnelMode} onChange={setFunnelMode} />
+            <p className="text-center text-xs text-gray-400 mt-2">Свайп влево/вправо по доске — переключение воронки</p>
           </div>
         </div>
 
@@ -532,9 +724,14 @@ export default function ProjectSalesPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          {STAGES.map((col) => {
-            const columnItems = byStage.get(col.id) ?? []
+        <div
+          className={`grid ${gridColsClass} gap-4`}
+          onTouchStart={onFunnelTouchStart}
+          onTouchEnd={onFunnelTouchEnd}
+        >
+          {funnelMode === 'project'
+            ? PROJECT_STAGES.map((col) => {
+            const columnItems = projectByStage.get(col.id) ?? []
             return (
               <div
                 key={col.id}
@@ -546,7 +743,7 @@ export default function ProjectSalesPage() {
                 onDragOver={(e) => onDragOverColumn(e, col.id)}
                 onDragLeave={onDragLeaveColumn}
                 onDrop={(e) => {
-                  void onDropColumn(e, col.id)
+                  void onDropProjectColumn(e, col.id)
                 }}
               >
                 <div className="relative border-b border-gray-200 bg-gradient-to-r from-primary-600/10 via-primary-500/10 to-transparent px-4 py-3">
@@ -566,7 +763,7 @@ export default function ProjectSalesPage() {
                       <div
                         key={row.id}
                         draggable={draggable}
-                        onDragStart={(e) => onDragStartCard(e, row)}
+                        onDragStart={(e) => onDragStartProjectCard(e, row)}
                         onDragEnd={onDragEndCard}
                         onClick={() => router.push(`/clients/${row.client.id}`)}
                         className={`rounded-2xl border border-gray-200 p-3 shadow-sm hover:shadow-md transition-shadow border-l-4 ${indicator.border} ${indicator.bg} relative ${
@@ -588,7 +785,7 @@ export default function ProjectSalesPage() {
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation()
-                                setDialog({ kind: 'takeWork', row })
+                                setDialog({ kind: 'takeWork', row, funnel: 'project' })
                               }}
                               className="w-full rounded-lg bg-primary-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-primary-700"
                             >
@@ -704,19 +901,136 @@ export default function ProjectSalesPage() {
                 </div>
               </div>
             )
-          })}
+          })
+            : BRAND_VISIT_STAGES.map((col) => {
+                const columnItems = brandVisitByStage.get(col.id) ?? []
+                return (
+                  <div
+                    key={col.id}
+                    className={`overflow-hidden rounded-3xl border transition-colors shadow-xl shadow-primary-900/5 ${
+                      dragOverStage === col.id
+                        ? 'border-primary-500 bg-primary-50'
+                        : 'border-gray-200 bg-white'
+                    }`}
+                    onDragOver={(e) => onDragOverColumn(e, col.id)}
+                    onDragLeave={onDragLeaveColumn}
+                    onDrop={(e) => {
+                      void onDropBrandVisitColumn(e, col.id)
+                    }}
+                  >
+                    <div className="relative border-b border-gray-200 bg-gradient-to-r from-primary-600/10 via-primary-500/10 to-transparent px-4 py-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="font-semibold text-gray-900 text-sm leading-tight">{col.label}</h3>
+                        <span className="text-xs text-gray-700 bg-white/80 border border-gray-200 px-2 py-1 rounded-lg shrink-0">
+                          {columnItems.length}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="p-4 space-y-3 max-h-[650px] overflow-y-auto">
+                      {columnItems.map((row) => {
+                        const indicator = getBrandVisitStageIndicator(row.stage)
+                        const canAct = canActOnBrandVisit(row, currentUser)
+                        const draggable = canAct
+                        return (
+                          <div
+                            key={row.id}
+                            draggable={draggable}
+                            onDragStart={(e) => onDragStartBrandVisitCard(e, row)}
+                            onDragEnd={onDragEndCard}
+                            onClick={() => router.push(`/clients/${row.client.id}`)}
+                            className={`rounded-2xl border border-gray-200 p-3 shadow-sm hover:shadow-md transition-shadow border-l-4 ${indicator.border} ${indicator.bg} relative ${
+                              dragId === row.id ? 'opacity-50' : ''
+                            } ${draggable ? 'cursor-move' : 'cursor-pointer'}`}
+                          >
+                            <div className="flex items-start justify-between mb-2 gap-2">
+                              <h4 className="font-medium text-gray-900 text-sm leading-snug pr-1">
+                                {brandTitle(row)}
+                              </h4>
+                              <Building2 className="h-4 w-4 text-gray-400 shrink-0" />
+                            </div>
+                            <p className="text-xs text-gray-500">
+                              {row.manager.firstName} {row.manager.lastName}
+                            </p>
+                            <p className="text-xs text-gray-400 mt-1">{formatCardDate(row.createdAt)}</p>
+
+                            {row.stage === 'NEW_BRANDS' && canAct && (
+                              <div className="mt-3 pt-3 border-t border-gray-200">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setDialog({ kind: 'takeWork', row, funnel: 'brandVisit' })
+                                  }}
+                                  className="w-full rounded-lg bg-primary-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-primary-700"
+                                >
+                                  Договориться о встрече
+                                </button>
+                              </div>
+                            )}
+
+                            {row.stage === 'MEETING_SCHEDULED' && canAct && (
+                              <div className="mt-3 pt-3 border-t border-gray-200">
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      void submitMeetingCompleted(row)
+                                    }}
+                                    className="flex-1 px-2 py-2 text-xs border border-gray-300 rounded-lg hover:bg-gray-50 font-semibold text-gray-800 transition-colors"
+                                  >
+                                    Встреча прошла
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setDialog({ kind: 'meetingFailed', row })
+                                    }}
+                                    className="flex-1 px-2 py-2 text-xs border border-gray-300 rounded-lg hover:bg-gray-50 font-semibold text-gray-800 transition-colors"
+                                  >
+                                    Не состоялась
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {row.stage === 'MEETING_FAILED' && row.failureReason && (
+                              <p className="mt-2 text-[11px] leading-snug text-rose-700 bg-rose-50/80 rounded-lg px-2 py-1.5 border border-rose-100">
+                                {row.failureReason}
+                              </p>
+                            )}
+
+                            {row.stage === 'MEETING_COMPLETED' && row.meetingNotes && (
+                              <p className="mt-2 text-[11px] leading-snug text-emerald-800 bg-emerald-50/80 rounded-lg px-2 py-1.5 border border-emerald-100">
+                                {row.meetingNotes}
+                              </p>
+                            )}
+
+                            {!canAct && (
+                              <p className="mt-2 text-[10px] text-gray-400 text-right">Только просмотр</p>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
         </div>
       </div>
 
       {dialog?.kind === 'takeWork' && (
         <FunnelModalShell
-          title="Взять в работу"
+          title={dialog.funnel === 'project' ? 'Взять в работу' : 'Договориться о встрече'}
           visible={dialogVisible}
           onClose={() => !dialogBusy && closeDialog()}
         >
           <div className="space-y-4 bg-gray-50/60 px-5 py-5">
             <p className="text-sm text-gray-600">
-              Контактные данные попадут в карточку клиента; бренд перейдёт в колонку «Бренды в работе».
+              {dialog.funnel === 'project'
+                ? 'Контактные данные попадут в карточку клиента; бренд перейдёт в колонку «Бренды в работе».'
+                : 'Контактные данные попадут в карточку клиента; бренд перейдёт в колонку «Договорился о встрече».'}
             </p>
             <div>
               <label className="mb-1.5 block text-sm font-semibold text-gray-900">
@@ -815,6 +1129,51 @@ export default function ProjectSalesPage() {
                 type="button"
                 disabled={dialogBusy || !declineReason.trim()}
                 onClick={() => void submitDecline()}
+                className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
+              >
+                {dialogBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+                Перенести
+              </button>
+            </div>
+          </div>
+        </FunnelModalShell>
+      )}
+
+      {dialog?.kind === 'meetingFailed' && (
+        <FunnelModalShell
+          title="Встреча не состоялась"
+          visible={dialogVisible}
+          onClose={() => !dialogBusy && closeDialog()}
+        >
+          <div className="space-y-4 bg-gray-50/60 px-5 py-5">
+            <p className="text-sm text-gray-600">
+              Укажите причину — она сохранится в карточке воронки и в заметках клиента.
+            </p>
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-gray-900">
+                Причина <span className="text-primary-500">*</span>
+              </label>
+              <textarea
+                value={meetingFailedReason}
+                onChange={(e) => setMeetingFailedReason(e.target.value)}
+                rows={4}
+                className="w-full resize-none rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
+                placeholder="Кратко опишите, почему встреча не состоялась"
+              />
+            </div>
+            <div className="flex justify-end gap-2 border-t border-gray-200/80 pt-4">
+              <button
+                type="button"
+                disabled={dialogBusy}
+                onClick={() => closeDialog()}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                disabled={dialogBusy || !meetingFailedReason.trim()}
+                onClick={() => void submitMeetingFailed()}
                 className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
               >
                 {dialogBusy && <Loader2 className="h-4 w-4 animate-spin" />}

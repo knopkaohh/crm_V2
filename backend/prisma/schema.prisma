@@ -65,6 +65,14 @@ enum ProjectSaleOrderKind {
   ORDER   // Заказ
 }
 
+// Этапы воронки «Бренды на выезд»
+enum BrandVisitStage {
+  NEW_BRANDS         // Новые бренды
+  MEETING_SCHEDULED  // Договорился о встрече
+  MEETING_COMPLETED  // Встреча прошла
+  MEETING_FAILED     // Встреча не состоялась
+}
+
 // Пользователи системы
 model User {
   id            String   @id @default(uuid())
@@ -105,6 +113,8 @@ model User {
   clientsCreated   Client[]         @relation("ClientCreatedBy")
   projectSalesAsManager ProjectSale[] @relation("ProjectSaleManager")
   projectSalesCreated   ProjectSale[] @relation("ProjectSaleCreator")
+  brandVisitsAsManager  BrandVisit[]  @relation("BrandVisitManager")
+  brandVisitsCreated    BrandVisit[]  @relation("BrandVisitCreator")
   monthlyManagerPlans   MonthlyManagerPlan[]
   dailySalesReports     DailySalesReport[]
   massTaskTemplatesCreated MassTaskTemplate[] @relation("MassTaskTemplateCreator")
@@ -139,6 +149,7 @@ model Client {
   chats         Chat[]
   closedContacts ClosedContact[] @relation("ClientClosedContacts")
   projectSales   ProjectSale[]
+  brandVisits    BrandVisit[]
   directComments Comment[]         @relation("CommentOnClient")
   clientFiles    File[]            @relation("FileOnClient")
 
@@ -174,6 +185,29 @@ model ProjectSale {
   @@index([clientId])
   @@index([createdAt])
   @@map("project_sales")
+}
+
+// Карточки воронки «Бренды на выезд»
+model BrandVisit {
+  id            String          @id @default(uuid())
+  clientId      String
+  managerId     String
+  stage         BrandVisitStage @default(NEW_BRANDS)
+  createdById   String?
+  failureReason String?         @db.Text
+  meetingNotes  String?         @db.Text
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  client    Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  manager   User   @relation("BrandVisitManager", fields: [managerId], references: [id])
+  createdBy User?  @relation("BrandVisitCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([managerId])
+  @@index([stage])
+  @@index([clientId])
+  @@index([createdAt])
+  @@map("brand_visits")
 }
 
 // Лиды (продажи)

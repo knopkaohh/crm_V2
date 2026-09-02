@@ -52,6 +52,7 @@ import chatRoutes from './routes/chats';
 import productionCalendarRoutes from './routes/production-calendar';
 import telegramRoutes from './routes/telegram';
 import projectSalesRoutes from './routes/project-sales';
+import brandVisitsRoutes from './routes/brand-visits';
 import salesReportRoutes from './routes/sales-reports';
 import massTaskTemplateRoutes from './routes/mass-task-templates';
 import { startLeadCallReminderCron } from './utils/lead-call-reminder-cron';
@@ -69,6 +70,7 @@ app.use('/api/chats', chatRoutes);
 app.use('/api/production-calendar', productionCalendarRoutes);
 app.use('/api/telegram', telegramRoutes);
 app.use('/api/project-sales', projectSalesRoutes);
+app.use('/api/brand-visits', brandVisitsRoutes);
 app.use('/api/sales-reports', salesReportRoutes);
 app.use('/api/mass-task-templates', massTaskTemplateRoutes);
 
