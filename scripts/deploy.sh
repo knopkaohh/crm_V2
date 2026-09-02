@@ -8,9 +8,9 @@
 #   SKIP_PULL=1                  — не делать git pull (уже обновили вручную)
 #   SKIP_MIGRATE=1               — не запускать prisma migrate deploy (только generate + build)
 #   NODE_BUILD_MEMORY_MB=4096    — лимит heap только для next build (по умолчанию 3072).
-#   SKIP_NPM_CI=1                — не делать npm ci (главная причина OOM на VPS). Зависимости ставь вручную
-#                                  когда менялся package.json: cd backend && npm ci && cd ../frontend && npm ci
-#                                  На слабом VPS: почти всегда деплой с SKIP_NPM_CI=1 после первичной установки.
+#   SKIP_NPM_CI=1                — не делать npm ci (главная причина OOM на VPS). Вместо ci выполняется
+#                                  лёгкий npm install (подтягивает новые пакеты из package-lock).
+#                                  Полный npm ci вручную, если менялась структура зависимостей сильно.
 
 set -euo pipefail
 
@@ -48,7 +48,8 @@ if [[ "${SKIP_NPM_CI}" == "1" ]]; then
     echo "Ошибка: SKIP_NPM_CI=1, но нет backend/node_modules. Один раз выполни: cd ${ROOT}/backend && npm ci" >&2
     exit 1
   fi
-  echo "==> SKIP_NPM_CI=1 — backend npm ci пропущен"
+  echo "==> SKIP_NPM_CI=1 — backend npm ci пропущен; npm install для новых зависимостей"
+  npm_config_maxsockets=2 npm install --no-audit --no-fund --prefer-offline
 else
   echo "==> backend npm ci (ограничение сокетов — меньше пик памяти)"
   npm_config_maxsockets=2 npm ci --no-audit --no-fund
@@ -79,7 +80,8 @@ if [[ "${SKIP_NPM_CI}" == "1" ]]; then
     echo "Ошибка: SKIP_NPM_CI=1, но нет frontend/node_modules. Один раз выполни: cd ${ROOT}/frontend && npm ci" >&2
     exit 1
   fi
-  echo "==> SKIP_NPM_CI=1 — frontend npm ci пропущен"
+  echo "==> SKIP_NPM_CI=1 — frontend npm ci пропущен; npm install для новых зависимостей"
+  npm_config_maxsockets=2 npm install --no-audit --no-fund --prefer-offline
 else
   echo "==> frontend npm ci"
   npm_config_maxsockets=2 npm ci --no-audit --no-fund
