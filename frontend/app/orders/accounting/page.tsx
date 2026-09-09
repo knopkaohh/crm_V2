@@ -18,6 +18,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useDebounce } from '@/hooks/useDebounce'
+import { ORDER_MATERIAL_OPTIONS } from '@/lib/order-materials'
 
 const STATUS_OPTIONS = [
   { value: 'NEW_ORDER', label: 'Новый заказ' },
@@ -48,6 +49,7 @@ interface OrderItem {
   name: string
   quantity: number
   price: number
+  notes?: string | null
   material?: string | null
 }
 
@@ -144,6 +146,99 @@ function unpaidAmountForOrder(order: AccountingOrder): number {
 
 function isUnpaidOrder(order: AccountingOrder): boolean {
   return resolvePaymentStatus(order) !== 'PAID'
+}
+
+const ACCOUNTING_EXPORT_HEADERS = [
+  'Номер заказа',
+  'Дата заказа',
+  'Источник',
+  'Кто продал',
+  'Способ оплаты',
+  'Клиент',
+  'Бренд',
+  'Количество',
+  'Материал',
+  'Размеры',
+  'Сумма заказа',
+]
+
+const MATERIALS_FOR_EXPORT = ORDER_MATERIAL_OPTIONS
+  .filter((material) => material !== 'Другое')
+  .slice()
+  .sort((a, b) => b.length - a.length)
+
+function cleanExportText(value: string | number | null | undefined): string {
+  return String(value ?? '').trim()
+}
+
+function formatDateForExport(iso: string): string {
+  const formatted = formatDateRu(iso)
+  return formatted === '—' ? '' : formatted
+}
+
+function extractSizeFromItemNotes(notes: string | null | undefined): string {
+  if (!notes?.trim()) return ''
+
+  for (const line of notes.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('Размер:')) {
+      return trimmed.slice('Размер:'.length).trim()
+    }
+  }
+
+  return ''
+}
+
+function normalizeForMaterialMatch(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function splitMaterialAndSize(item: OrderItem): { material: string; size: string } {
+  const itemName = cleanExportText(item.name)
+  const storedMaterial = cleanExportText(item.material)
+  const sizeFromNotes = extractSizeFromItemNotes(item.notes)
+
+  if (storedMaterial) {
+    let size = sizeFromNotes
+    const normalizedName = normalizeForMaterialMatch(itemName)
+    const normalizedMaterial = normalizeForMaterialMatch(storedMaterial)
+
+    if (!size && normalizedName.startsWith(normalizedMaterial)) {
+      size = itemName.slice(storedMaterial.length).trim()
+    }
+
+    return { material: storedMaterial, size }
+  }
+
+  const matchedMaterial = MATERIALS_FOR_EXPORT.find((material) =>
+    normalizeForMaterialMatch(itemName).startsWith(normalizeForMaterialMatch(material)),
+  )
+
+  if (matchedMaterial) {
+    return {
+      material: matchedMaterial,
+      size: sizeFromNotes || itemName.slice(matchedMaterial.length).trim(),
+    }
+  }
+
+  return { material: itemName, size: sizeFromNotes }
+}
+
+function managerNameForExport(manager: AccountingOrder['manager']): string {
+  if (!manager) return ''
+  return manager.firstName?.trim() || `${manager.firstName} ${manager.lastName}`.trim()
+}
+
+function buildAccountingExportFileName(dateFrom: string, dateTo: string): string {
+  if (dateFrom || dateTo) {
+    return `uchet-zakazov-${dateFrom || 'start'}-${dateTo || 'end'}.xlsx`
+  }
+
+  const now = new Date()
+  const yyyy = now.getFullYear()
+  const mm = String(now.getMonth() + 1).padStart(2, '0')
+  const dd = String(now.getDate()).padStart(2, '0')
+  return `uchet-zakazov-${yyyy}-${mm}-${dd}.xlsx`
 }
 
 export default function OrderAccountingPage() {
@@ -448,6 +543,72 @@ export default function OrderAccountingPage() {
     }
   }
 
+  const handleExportExcel = async () => {
+    if (filteredOrders.length === 0) {
+      alert('Нет заказов для выгрузки по выбранным фильтрам.')
+      return
+    }
+
+    const rows = filteredOrders.flatMap((order) => {
+      const items = order.items?.length ? order.items : [null]
+      const paymentLabel = order.paymentType
+        ? PAYMENT_LABELS[order.paymentType] ?? order.paymentType
+        : ''
+
+      return items.map((item) => {
+        const itemDetails = item ? splitMaterialAndSize(item) : { material: '', size: '' }
+
+        return [
+          cleanExportText(order.orderNumber),
+          formatDateForExport(order.createdAt),
+          cleanExportText(order.source),
+          managerNameForExport(order.manager),
+          paymentLabel,
+          cleanExportText(order.client?.name),
+          cleanExportText(order.client?.company),
+          item ? Number(item.quantity ?? 0) : '',
+          itemDetails.material,
+          itemDetails.size,
+          item ? Number(item.price ?? 0) : Number(order.totalAmount ?? 0),
+        ]
+      })
+    })
+
+    const XLSX = await import('xlsx')
+    const worksheet = XLSX.utils.aoa_to_sheet([ACCOUNTING_EXPORT_HEADERS, ...rows])
+    worksheet['!cols'] = [
+      { wch: 14 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 14 },
+      { wch: 16 },
+      { wch: 24 },
+      { wch: 20 },
+      { wch: 12 },
+      { wch: 22 },
+      { wch: 16 },
+      { wch: 14 },
+    ]
+    worksheet['!autofilter'] = {
+      ref: XLSX.utils.encode_range({
+        s: { r: 0, c: 0 },
+        e: { r: rows.length, c: ACCOUNTING_EXPORT_HEADERS.length - 1 },
+      }),
+    }
+
+    rows.forEach((_, index) => {
+      const quantityCell = worksheet[XLSX.utils.encode_cell({ r: index + 1, c: 7 })]
+      if (quantityCell) quantityCell.z = '0'
+
+      const amountCell = worksheet[XLSX.utils.encode_cell({ r: index + 1, c: 10 })]
+      if (amountCell) amountCell.z = '#,##0.00'
+    })
+
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Учёт заказов')
+    XLSX.writeFile(workbook, buildAccountingExportFileName(dateFrom, dateTo))
+  }
+
   const inputDateClass =
     'py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-primary-500 focus:border-transparent'
   const inputSearchClass =
@@ -520,6 +681,14 @@ export default function OrderAccountingPage() {
                 className={inputDateClass}
               />
             </div>
+            <button
+              type="button"
+              onClick={() => void handleExportExcel()}
+              disabled={filteredOrders.length === 0}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 border border-green-200 rounded-xl text-sm font-medium text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+            >
+              <FileSpreadsheet className="h-4 w-4" /> Выгрузить Excel
+            </button>
             <Link
               href="/orders"
               className="inline-flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-xl text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors shadow-sm"
