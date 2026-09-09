@@ -187,6 +187,7 @@ export default function Layout({ children }: LayoutProps) {
   }
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/')
+  const showAntonCatAvatar = user.email.toLowerCase() === 'antonfedtube@gmail.com'
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -243,11 +244,20 @@ export default function Layout({ children }: LayoutProps) {
           {/* User info */}
           <div className="p-4 border-t">
             <div className="flex items-center gap-3 mb-3">
-              <div className="h-10 w-10 rounded-full bg-primary-100 flex items-center justify-center">
-                <span className="text-primary-600 font-semibold">
-                  {user.firstName[0]}{user.lastName[0]}
-                </span>
-              </div>
+              {showAntonCatAvatar ? (
+                <div
+                  className="h-10 w-10 rounded-full bg-orange-100 bg-cover bg-center ring-2 ring-orange-200"
+                  style={{ backgroundImage: "url('/avatars/anton-cat.svg')" }}
+                  role="img"
+                  aria-label="Аватар Антона Федотова с котиком"
+                />
+              ) : (
+                <div className="h-10 w-10 rounded-full bg-primary-100 flex items-center justify-center">
+                  <span className="text-primary-600 font-semibold">
+                    {user.firstName[0]}{user.lastName[0]}
+                  </span>
+                </div>
+              )}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900 truncate">
                   {user.firstName} {user.lastName}

@@ -145,11 +145,13 @@ router.get('/', authenticate, async (req, res) => {
               name: true,
               quantity: true,
               price: true,
+              notes: true,
               material: true,
               desiredDeadline: true,
               productionStartDate: true,
               productionEndDate: true,
             },
+            orderBy: { createdAt: 'asc' },
           },
           _count: {
             select: {
@@ -489,6 +491,10 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           quantity: parseInt(item.quantity) || 1,
           price: parseFloat(item.price) || 0, // price уже содержит итоговую стоимость позиции
           notes: item.notes || null,
+          material:
+            item.material !== undefined && item.material !== null
+              ? String(item.material).trim() || null
+              : null,
           desiredDeadline: item.desiredDeadline ? new Date(item.desiredDeadline) : null,
         })),
       },
