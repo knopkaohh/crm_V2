@@ -4,6 +4,7 @@ import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import XLSX from 'xlsx';
 import PDFDocument from 'pdfkit';
+import { getIsolatedUserIds, isIsolatedRole, managerExclusion } from '../utils/isolated-access';
 
 const router = express.Router();
 
@@ -56,9 +57,17 @@ const getMonthRangeFromPeriod = (rawPeriod: unknown) => {
 // Получить метрики для дашборда
 router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
   try {
-    const whereManager = {};
+    const isolated = isIsolatedRole(req.userRole);
+    const isolatedIds = isolated ? [] : await getIsolatedUserIds();
+    const whereManager = isolated
+      ? { OR: [{ managerId: req.userId }, { creatorId: req.userId }] }
+      : (managerExclusion(isolatedIds) ?? {});
     const whereCreator = {};
-    const whereAssignee = {};
+    const whereAssignee = isolated
+      ? { OR: [{ assigneeId: req.userId }, { creatorId: req.userId }] }
+      : isolatedIds.length > 0
+        ? { NOT: { creatorId: { in: isolatedIds } } }
+        : {};
     const now = new Date();
     const { period, monthStart, nextMonthStart, isCurrentCalendarMonth } =
       getMonthRangeFromPeriod(req.query.period);
@@ -213,15 +222,24 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
           },
         },
       }),
-      prisma.user.findMany({
-        where: salesFacingUserWhereClause(),
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-        },
-        orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
-      }),
+      isolated
+        ? prisma.user.findMany({
+            where: { id: req.userId },
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
+          })
+        : prisma.user.findMany({
+            where: salesFacingUserWhereClause(),
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
+            orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+          }),
     ]);
 
     const normalize = (value: string | null | undefined) => (value ?? '').trim().toLowerCase();
@@ -370,9 +388,9 @@ router.get('/manager-plans', authenticate, async (req: AuthRequest, res) => {
     }
 
     const plans = await prisma.monthlyManagerPlan.findMany({
-      where: {
-        period,
-      },
+      where: isIsolatedRole(req.userRole)
+        ? { period, managerId: req.userId }
+        : { period },
       select: {
         managerId: true,
         planAmount: true,
@@ -547,12 +565,15 @@ router.get('/export/excel', authenticate, requireRole('EXECUTIVE', 'ADMIN'), asy
       if (endDate) dateFilter.createdAt.lte = new Date(endDate as string);
     }
 
+    const hiddenManagers = managerExclusion(await getIsolatedUserIds());
+    const exportWhere = hiddenManagers ? { AND: [dateFilter, hiddenManagers] } : dateFilter;
+
     let data: any[] = [];
     let filename = 'report.xlsx';
 
     if (type === 'leads') {
       const leads = await prisma.lead.findMany({
-        where: dateFilter,
+        where: exportWhere,
         include: {
           client: true,
           manager: true,
@@ -571,7 +592,7 @@ router.get('/export/excel', authenticate, requireRole('EXECUTIVE', 'ADMIN'), asy
       filename = 'leads.xlsx';
     } else if (type === 'orders') {
       const orders = await prisma.order.findMany({
-        where: dateFilter,
+        where: exportWhere,
         include: {
           client: true,
           manager: true,
@@ -618,12 +639,15 @@ router.get('/export/csv', authenticate, requireRole('EXECUTIVE', 'ADMIN'), async
       if (endDate) dateFilter.createdAt.lte = new Date(endDate as string);
     }
 
+    const hiddenManagers = managerExclusion(await getIsolatedUserIds());
+    const exportWhere = hiddenManagers ? { AND: [dateFilter, hiddenManagers] } : dateFilter;
+
     let data: any[] = [];
     let filename = 'report.csv';
 
     if (type === 'leads') {
       const leads = await prisma.lead.findMany({
-        where: dateFilter,
+        where: exportWhere,
         include: {
           client: true,
           manager: true,
@@ -642,7 +666,7 @@ router.get('/export/csv', authenticate, requireRole('EXECUTIVE', 'ADMIN'), async
       filename = 'leads.csv';
     } else if (type === 'orders') {
       const orders = await prisma.order.findMany({
-        where: dateFilter,
+        where: exportWhere,
         include: {
           client: true,
           manager: true,

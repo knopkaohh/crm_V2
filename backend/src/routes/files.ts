@@ -6,6 +6,12 @@ import fs from 'fs';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { canAccessLeadByManager } from '../utils/leads-access';
+import {
+  isClientHiddenFrom,
+  isIsolatedRole,
+  isOrderVisible,
+  rejectIfLeadHidden,
+} from '../utils/isolated-access';
 
 const router = express.Router();
 
@@ -85,9 +91,9 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
     if (clientId) {
       const client = await prisma.client.findUnique({
         where: { id: clientId as string },
-        select: { id: true },
+        select: { id: true, createdById: true },
       });
-      if (!client) {
+      if (!client || (await isClientHiddenFrom(req, client))) {
         return res.json([]);
       }
       where.clientId = clientId as string;
@@ -118,11 +124,33 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
       if (!canAccessLeadByManager(req, lead.managerId)) {
         return res.status(403).json({ error: 'Недостаточно прав доступа' });
       }
+      if (await rejectIfLeadHidden(req, res, lead)) return;
       where.leadId = leadId as string;
     }
 
     if (orderId) {
+      const order = await prisma.order.findUnique({
+        where: { id: orderId as string },
+        select: { managerId: true, creatorId: true },
+      });
+      if (!order || !(await isOrderVisible(req, order))) {
+        return res.json([]);
+      }
       where.orderId = orderId as string;
+    }
+
+    if (isIsolatedRole(req.userRole) && !leadId && !orderId && !projectSaleId && !clientId) {
+      return res.json([]);
+    }
+
+    if (clientId && isIsolatedRole(req.userRole)) {
+      const client = await prisma.client.findUnique({
+        where: { id: clientId as string },
+        select: { createdById: true },
+      });
+      if (!client || (await isClientHiddenFrom(req, client))) {
+        return res.json([]);
+      }
     }
 
     const files = await prisma.file.findMany({
@@ -171,9 +199,9 @@ router.post('/upload', authenticate, (req: AuthRequest, res) => {
     if (clientId) {
       const client = await prisma.client.findUnique({
         where: { id: clientId as string },
-        select: { id: true },
+        select: { id: true, createdById: true },
       });
-      if (!client) {
+      if (!client || (await isClientHiddenFrom(req, client))) {
         try {
           await fsPromises.unlink(req.file.path);
         } catch {
@@ -227,6 +255,29 @@ router.post('/upload', authenticate, (req: AuthRequest, res) => {
         }
         return res.status(403).json({ error: 'Недостаточно прав доступа' });
       }
+      if (await rejectIfLeadHidden(req, res, lead)) {
+        try {
+          await fsPromises.unlink(req.file.path);
+        } catch {
+          /* noop */
+        }
+        return;
+      }
+    }
+
+    if (orderId) {
+      const order = await prisma.order.findUnique({
+        where: { id: orderId as string },
+        select: { managerId: true, creatorId: true },
+      });
+      if (!order || !(await isOrderVisible(req, order))) {
+        try {
+          await fsPromises.unlink(req.file.path);
+        } catch {
+          /* noop */
+        }
+        return res.status(404).json({ error: 'Заказ не найден' });
+      }
     }
 
     const file = await prisma.file.create({
@@ -269,9 +320,9 @@ router.get('/:id/download', authenticate, async (req: AuthRequest, res) => {
       where: { id },
       include: {
         lead: { select: { managerId: true } },
-        order: { select: { managerId: true } },
+        order: { select: { managerId: true, creatorId: true } },
         projectSale: { select: { managerId: true } },
-        client: { select: { id: true } },
+        client: { select: { id: true, createdById: true } },
       },
     });
 
@@ -281,6 +332,15 @@ router.get('/:id/download', authenticate, async (req: AuthRequest, res) => {
 
     if (file.leadId && file.lead && !canAccessLeadByManager(req as AuthRequest, file.lead.managerId)) {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
+    }
+    if (file.lead && (await rejectIfLeadHidden(req, res, file.lead))) return;
+
+    if (file.order && !(await isOrderVisible(req, file.order))) {
+      return res.status(404).json({ error: 'Файл не найден' });
+    }
+
+    if (file.client && (await isClientHiddenFrom(req, file.client))) {
+      return res.status(404).json({ error: 'Файл не найден' });
     }
 
     if (file.projectSaleId && file.projectSale) {

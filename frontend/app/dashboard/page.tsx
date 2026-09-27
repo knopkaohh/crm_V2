@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Layout from '@/components/Layout'
 import api, { isRequestAborted } from '@/lib/api'
+import { auth, User } from '@/lib/auth'
 import { CalendarRange } from 'lucide-react'
 
 interface DashboardData {
@@ -127,6 +128,13 @@ export default function DashboardPage() {
   const [plansByPeriod, setPlansByPeriod] = useState<Record<string, Record<string, number>>>({})
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false)
   const [draftPlans, setDraftPlans] = useState<Record<string, number>>({})
+  const [currentUser, setCurrentUser] = useState<User | null | undefined>(undefined)
+
+  useEffect(() => {
+    auth.getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null))
+  }, [])
+
+  const isIsolated = currentUser?.role === 'ISOLATED'
 
   useEffect(() => {
     let cancelled = false
@@ -277,6 +285,37 @@ export default function DashboardPage() {
   }
 
   const managerRows = useMemo(() => {
+    if (isIsolated) {
+      const source = data?.currentMonth.managerRevenue ?? []
+      const selfName = currentUser
+        ? `${currentUser.firstName} ${currentUser.lastName}`.trim()
+        : 'Мои продажи'
+      const base = source.length > 0
+        ? source
+        : [{
+            managerId: currentUser?.id || 'self',
+            name: selfName,
+            assemblyRevenue: 0,
+            packageRevenue: 0,
+          }]
+      return base.map((manager) => {
+        const salesRevenue = manager.assemblyRevenue + manager.packageRevenue
+        const plan = plansForPeriod[manager.managerId] ?? 0
+        const percent = plan > 0 ? Number(((salesRevenue / plan) * 100).toFixed(2)) : 0
+        return {
+          managerId: manager.managerId,
+          name: manager.name,
+          shortName: manager.name.split(' ')[0] || manager.name,
+          assemblyRevenue: manager.assemblyRevenue,
+          packageRevenue: manager.packageRevenue,
+          salesRevenue,
+          revenue: salesRevenue,
+          plan,
+          percent,
+        }
+      })
+    }
+
     const managerRevenueFromApi = data?.currentMonth.managerRevenue ?? []
     const apiByManagerId = managerRevenueFromApi.reduce((acc, manager) => {
       acc[manager.managerId] = manager
@@ -361,9 +400,9 @@ export default function DashboardPage() {
     }
 
     return merged
-  }, [data?.salesManagers, data?.currentMonth.managerRevenue, plansForPeriod])
+  }, [data?.salesManagers, data?.currentMonth.managerRevenue, plansForPeriod, isIsolated, currentUser])
 
-  if (loading) {
+  if (loading || currentUser === undefined) {
     return (
       <Layout>
         <div className="flex items-center justify-center h-64">
@@ -398,7 +437,11 @@ export default function DashboardPage() {
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Главная</h1>
-              <p className="text-gray-600 mt-1">Ключевые показатели по продажам и эффективности команды</p>
+              <p className="text-gray-600 mt-1">
+                {isIsolated
+                  ? 'Ваши показатели. Чужие заказы, клиенты и статистика не отображаются'
+                  : 'Ключевые показатели по продажам и эффективности команды'}
+              </p>
             </div>
             <label className="flex items-center gap-2 bg-white border border-gray-300 rounded-lg px-3 py-2 w-fit text-gray-700 shadow-sm">
               <CalendarRange className="h-4 w-4" />
@@ -515,12 +558,14 @@ export default function DashboardPage() {
             </div>
             <div className="col-span-5 bg-primary-100/70 px-4 py-3 border-b border-gray-200 flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold tracking-wide text-gray-800">Выполнение</h2>
-              <button
-                onClick={openPlanModal}
-                className="text-xs font-medium bg-primary-600 text-white px-3 py-1.5 rounded-lg hover:bg-primary-700 transition-colors shadow-sm"
-              >
-                Назначить план
-              </button>
+              {!isIsolated && (
+                <button
+                  onClick={openPlanModal}
+                  className="text-xs font-medium bg-primary-600 text-white px-3 py-1.5 rounded-lg hover:bg-primary-700 transition-colors shadow-sm"
+                >
+                  Назначить план
+                </button>
+              )}
             </div>
           </div>
 

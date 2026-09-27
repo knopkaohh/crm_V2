@@ -2,6 +2,14 @@ import express from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { canAccessLeadByManager } from '../utils/leads-access';
+import {
+  getIsolatedUserIds,
+  isIsolatedRole,
+  isolatedClientScope,
+  rejectIfClientHidden,
+  rejectIfLeadHidden,
+  rejectIfOrderHidden,
+} from '../utils/isolated-access';
 
 const router = express.Router();
 
@@ -50,6 +58,18 @@ router.get('/', authenticate, async (req, res) => {
           },
         },
       });
+    }
+
+    const authReq = req as AuthRequest;
+    if (isIsolatedRole(authReq.userRole) && authReq.userId) {
+      andConditions.push(isolatedClientScope(authReq.userId));
+    } else {
+      const isolatedIds = await getIsolatedUserIds();
+      if (isolatedIds.length > 0) {
+        andConditions.push({
+          OR: [{ createdById: null }, { createdById: { notIn: isolatedIds } }],
+        });
+      }
     }
 
     if (andConditions.length > 0) {
@@ -135,10 +155,22 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // Закрытые контакты (архив)
-router.get('/closed-contacts', authenticate, async (req, res) => {
+router.get('/closed-contacts', authenticate, async (req: AuthRequest, res) => {
   try {
     const { search } = req.query;
     const where: any = {};
+    if (isIsolatedRole(req.userRole)) {
+      where.managerId = req.userId;
+    } else {
+      const isolatedIds = await getIsolatedUserIds();
+      if (isolatedIds.length > 0) {
+        where.AND = [
+          {
+            OR: [{ managerId: null }, { managerId: { notIn: isolatedIds } }],
+          },
+        ];
+      }
+    }
 
     if (search) {
       where.OR = [
@@ -177,9 +209,26 @@ router.get('/closed-contacts', authenticate, async (req, res) => {
 });
 
 // Удалить закрытый контакт
-router.delete('/closed-contacts/:id', authenticate, async (req, res) => {
+router.delete('/closed-contacts/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
+
+    const existing = await prisma.closedContact.findUnique({
+      where: { id },
+      select: { managerId: true },
+    });
+    if (existing) {
+      if (isIsolatedRole(req.userRole)) {
+        if (existing.managerId !== req.userId) {
+          return res.status(404).json({ error: 'Закрытый контакт не найден' });
+        }
+      } else if (existing.managerId) {
+        const isolatedIds = await getIsolatedUserIds();
+        if (isolatedIds.includes(existing.managerId)) {
+          return res.status(404).json({ error: 'Закрытый контакт не найден' });
+        }
+      }
+    }
 
     await prisma.closedContact.delete({
       where: { id },
@@ -196,6 +245,7 @@ router.delete('/closed-contacts/:id', authenticate, async (req, res) => {
 router.post('/:id/close', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
+    if (await rejectIfClientHidden(req, res, id)) return;
     const { reason, notes } = req.body;
 
     if (!reason || !reason.trim()) {
@@ -445,6 +495,18 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Клиент не найден' });
     }
 
+    if (await rejectIfClientHidden(req as AuthRequest, res, id)) return;
+
+    const authReq = req as AuthRequest;
+    if (isIsolatedRole(authReq.userRole)) {
+      client.orders = client.orders.filter(
+        (order) => order.manager?.id === authReq.userId,
+      );
+      client.leads = client.leads.filter(
+        (lead) => lead.manager?.id === authReq.userId,
+      );
+    }
+
     res.json(client);
   } catch (error) {
     console.error('Get client error:', error);
@@ -456,6 +518,7 @@ router.get('/:id', authenticate, async (req, res) => {
 router.post('/:id/comments', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
+    if (await rejectIfClientHidden(req, res, id)) return;
     const { content, orderId, leadId } = req.body;
 
     if (!content) {
@@ -472,6 +535,7 @@ router.post('/:id/comments', authenticate, async (req: AuthRequest, res) => {
       if (!order) {
         return res.status(404).json({ error: 'Заказ не найден у этого клиента' });
       }
+      if (await rejectIfOrderHidden(req, res, orderId as string)) return;
       const comment = await prisma.comment.create({
         data: {
           content,
@@ -500,6 +564,7 @@ router.post('/:id/comments', authenticate, async (req: AuthRequest, res) => {
       if (!canAccessLeadByManager(req, lead.managerId)) {
         return res.status(403).json({ error: 'Недостаточно прав доступа' });
       }
+      if (await rejectIfLeadHidden(req, res, lead)) return;
       const comment = await prisma.comment.create({
         data: {
           content,
@@ -585,9 +650,10 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 });
 
 // Обновить клиента
-router.put('/:id', authenticate, async (req, res) => {
+router.put('/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
+    if (await rejectIfClientHidden(req, res, id)) return;
     const { name, company, email, phone, whatsapp, address, notes, contactMethod, telegram } = req.body;
 
     const client = await prisma.client.update({
@@ -613,9 +679,10 @@ router.put('/:id', authenticate, async (req, res) => {
 });
 
 // Удалить клиента
-router.delete('/:id', authenticate, async (req, res) => {
+router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
+    if (await rejectIfClientHidden(req, res, id)) return;
 
     await prisma.client.delete({
       where: { id },

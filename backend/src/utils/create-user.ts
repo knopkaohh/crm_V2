@@ -3,7 +3,7 @@
  * Запуск: npm run create-user <email> <password> <firstName> <lastName> <role> [phone]
  * Пример: npm run create-user user@example.com password123 Иван Иванов SALES_MANAGER +79991234567
  * 
- * Доступные роли: ADMIN, SALES_MANAGER, TECHNOLOGIST, EXECUTIVE
+ * Доступные роли: ADMIN, SALES_MANAGER, TECHNOLOGIST, EXECUTIVE, ISOLATED
  */
 
 import dotenv from 'dotenv';
@@ -33,10 +33,11 @@ async function createUser() {
     console.log('  - SALES_MANAGER');
     console.log('  - TECHNOLOGIST');
     console.log('  - EXECUTIVE');
+    console.log('  - ISOLATED');
     process.exit(1);
   }
 
-  const validRoles: UserRole[] = ['ADMIN', 'SALES_MANAGER', 'TECHNOLOGIST', 'EXECUTIVE'];
+  const validRoles: UserRole[] = ['ADMIN', 'SALES_MANAGER', 'TECHNOLOGIST', 'EXECUTIVE', 'ISOLATED'];
   if (!validRoles.includes(role)) {
     console.error(`❌ Ошибка: Недопустимая роль "${role}"`);
     console.log('Доступные роли:', validRoles.join(', '));

@@ -12,9 +12,12 @@ export async function getTaskBoardManagers() {
       email: true,
       firstName: true,
       lastName: true,
+      role: true,
     },
     orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
   });
 
-  return users.filter((u) => !isTaskExcludedEmail(u.email));
+  return users
+    .filter((u) => u.role !== 'ISOLATED' && !isTaskExcludedEmail(u.email))
+    .map(({ role: _role, ...user }) => user);
 }

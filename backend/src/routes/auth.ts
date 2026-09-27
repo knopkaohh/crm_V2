@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
+import { clearIsolatedUserCache, isIsolatedRole } from '../utils/isolated-access';
 
 const router = express.Router();
 
@@ -47,6 +48,10 @@ router.post('/register', authenticate, async (req: AuthRequest, res) => {
         role: true,
       },
     });
+
+    if (isIsolatedRole(role)) {
+      clearIsolatedUserCache();
+    }
 
     res.status(201).json(user);
   } catch (error) {

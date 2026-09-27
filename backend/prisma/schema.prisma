@@ -16,6 +16,7 @@ enum UserRole {
   EXECUTIVE
   ADMIN
   VAN_DAM_TERMINATOR
+  ISOLATED // Свой кабинет: полный функционал, только свои данные
 }
 
 enum LeadStatus {

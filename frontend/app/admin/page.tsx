@@ -24,6 +24,7 @@ const roleLabels: Record<string, string> = {
   CLIENT_MANAGER: 'Клиент Менеджер',
   TECHNOLOGIST: 'Технолог',
   VAN_DAM_TERMINATOR: 'Жан-Клод-Ван Дам Терминатор',
+  ISOLATED: 'Изолированный кабинет',
 }
 
 export default function AdminPage() {
@@ -342,6 +343,7 @@ export default function AdminPage() {
                   <option value="TECHNOLOGIST">Технолог</option>
                   <option value="EXECUTIVE">Руководитель</option>
                   <option value="ADMIN">Администратор</option>
+                  <option value="ISOLATED">Изолированный кабинет (только свои данные)</option>
                 </select>
               </div>
               <div className="flex gap-4 pt-4">

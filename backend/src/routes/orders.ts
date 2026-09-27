@@ -7,6 +7,14 @@ import { prisma } from '../utils/prisma';
 import { generateOrderNumber } from '../utils/order-utils';
 import { notifyAllUsersAboutNewOrder } from '../utils/telegram';
 import { canAccessLeadByManager } from '../utils/leads-access';
+import {
+  andWhere,
+  isIsolatedRole,
+  ISOLATED_ROLE,
+  orderListScope,
+  rejectIfClientHidden,
+  rejectIfOrderHidden,
+} from '../utils/isolated-access';
 import { parseNotificationSettings } from '../utils/notification-settings';
 import {
   formatDesignInDevelopmentNotification,
@@ -87,9 +95,11 @@ router.get('/', authenticate, async (req, res) => {
       }
     }
 
+    const scopedWhere = andWhere(where, await orderListScope(req as AuthRequest));
+
     const [orders, total] = await Promise.all([
       prisma.order.findMany({
-        where,
+        where: scopedWhere,
         select: {
           id: true,
           orderNumber: true,
@@ -162,7 +172,7 @@ router.get('/', authenticate, async (req, res) => {
         skip,
         take: limitNum,
       }),
-      prisma.order.count({ where }),
+      prisma.order.count({ where: scopedWhere }),
     ]);
 
     res.json({
@@ -188,8 +198,16 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // Менеджеры с заказами в CRM (для фильтров и назначения задач)
-router.get('/managers', authenticate, async (_req, res) => {
+router.get('/managers', authenticate, async (req: AuthRequest, res) => {
   try {
+    if (isIsolatedRole(req.userRole)) {
+      const me = await prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { id: true, firstName: true, lastName: true },
+      });
+      return res.json(me ? [me] : []);
+    }
+
     const users = await prisma.user.findMany({
       where: {
         isActive: true,
@@ -199,10 +217,15 @@ router.get('/managers', authenticate, async (_req, res) => {
         id: true,
         firstName: true,
         lastName: true,
+        role: true,
       },
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     });
-    res.json(users);
+    res.json(
+      users
+        .filter((user) => user.role !== ISOLATED_ROLE)
+        .map(({ id, firstName, lastName }) => ({ id, firstName, lastName })),
+    );
   } catch (error) {
     console.error('Get order managers error:', error);
     res.status(500).json({ error: 'Ошибка при загрузке списка менеджеров' });
@@ -213,6 +236,7 @@ router.get('/managers', authenticate, async (_req, res) => {
 router.get('/:id/invoice', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
+    if (await rejectIfOrderHidden(req, res, id)) return;
 
     const order = await prisma.order.findUnique({
       where: { id },
@@ -307,6 +331,7 @@ router.get('/:id/invoice', authenticate, async (req: AuthRequest, res) => {
 router.get('/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
+    if (await rejectIfOrderHidden(req, res, id)) return;
 
     const order = await prisma.order.findUnique({
       where: { id },
@@ -451,6 +476,9 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Клиент и позиции заказа обязательны' });
     }
 
+    if (await rejectIfClientHidden(req, res, clientId)) return;
+    const resolvedManagerId = isIsolatedRole(req.userRole) ? req.userId! : (managerId || req.userId!);
+
     // Расчет общей суммы - price уже содержит итоговую стоимость позиции
     const totalAmount = items.reduce(
       (sum: number, item: any) => sum + parseFloat(item.price || 0),
@@ -474,7 +502,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 
     const orderData: any = {
       clientId,
-      managerId: managerId || req.userId!,
+      managerId: resolvedManagerId,
       creatorId: req.userId!,
       orderNumber,
       totalAmount: totalAmount,
@@ -525,10 +553,12 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       },
     });
 
-    // Уведомление о новом заказе — всем активным пользователям (с учётом настроек)
+    // Уведомление о новом заказе — всем активным пользователям (с учётом настроек).
+    // Заказ изолированного кабинета команде не рассылается.
+    if (!isIsolatedRole(req.userRole)) {
     const allUsers = await prisma.user.findMany({
       where: { isActive: true },
-      select: { id: true, notificationSettings: true },
+      select: { id: true, notificationSettings: true, role: true },
     });
 
     const { title: newOrderTitle, message: newOrderMessage } =
@@ -549,6 +579,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     await Promise.all(
       allUsers
         .filter((user) => {
+          if (user.role === ISOLATED_ROLE) return false;
           const settings = parseNotificationSettings(user.notificationSettings);
           return settings.enabled !== false && settings.order.created !== false;
         })
@@ -574,6 +605,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     });
 
     broadcastOrderUpdate(order.id, order);
+    }
 
     // Если заказ создан из лида, автоматически закрываем лид
     if (leadId) {
@@ -620,7 +652,9 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           });
 
           // Отправляем уведомление о закрытии лида через WebSocket
-          broadcastLeadUpdate(lead.id, { deleted: true, closedContact: true });
+          if (!isIsolatedRole(req.userRole)) {
+            broadcastLeadUpdate(lead.id, { deleted: true, closedContact: true });
+          }
         }
       } catch (leadCloseError: any) {
         // Логируем ошибку, но не прерываем создание заказа
@@ -656,6 +690,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 router.put('/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
+    if (await rejectIfOrderHidden(req, res, id)) return;
     const {
       status,
       deadline,
@@ -826,7 +861,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
       nextDesignStage,
     });
 
-    if (enteredDesign) {
+    if (enteredDesign && existingOrder.manager.role !== ISOLATED_ROLE) {
       const actor = await prisma.user.findUnique({
         where: { id: req.userId! },
         select: { firstName: true, lastName: true },
@@ -1020,7 +1055,9 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
       },
     });
 
-    broadcastOrderUpdate(order.id, order);
+    if (!isIsolatedRole(req.userRole)) {
+      broadcastOrderUpdate(order.id, order);
+    }
 
     res.json(order);
   } catch (error) {
@@ -1036,6 +1073,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
 router.post('/:id/items', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
+    if (await rejectIfOrderHidden(req, res, id)) return;
     const { name, quantity, price, notes } = req.body;
 
     if (!name || !quantity || !price) {
@@ -1092,6 +1130,7 @@ router.post('/:id/items', authenticate, async (req: AuthRequest, res) => {
 router.put('/:orderId/items/:itemId', authenticate, async (req: AuthRequest, res) => {
   try {
     const { orderId, itemId } = req.params;
+    if (await rejectIfOrderHidden(req, res, orderId)) return;
     const updateData = req.body;
 
     console.log('Update item request:', { orderId, itemId, updateData });
@@ -1197,6 +1236,7 @@ const isSameCalendarDay = (a: Date, b: Date) =>
 router.post('/:id/move-to-current-month', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
+    if (await rejectIfOrderHidden(req, res, id)) return;
 
     const existingOrder = await prisma.order.findUnique({
       where: { id },
@@ -1263,7 +1303,9 @@ router.post('/:id/move-to-current-month', authenticate, async (req: AuthRequest,
       return updated;
     });
 
-    broadcastOrderUpdate(order.id, order);
+    if (!isIsolatedRole(req.userRole)) {
+      broadcastOrderUpdate(order.id, order);
+    }
 
     res.json({
       order,
@@ -1280,6 +1322,7 @@ router.post('/:id/move-to-current-month', authenticate, async (req: AuthRequest,
 router.post('/:id/comments', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
+    if (await rejectIfOrderHidden(req, res, id)) return;
     const { content } = req.body;
 
     if (!content) {
