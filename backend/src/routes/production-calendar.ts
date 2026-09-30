@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
+import { andWhere, orderListScope, rejectIfOrderHidden } from '../utils/isolated-access';
 
 const router = express.Router();
 
@@ -11,9 +12,10 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
 
     // Получаем все позиции заказов в статусе "В производстве"
     const where: any = {
-      order: {
-        status: 'IN_PRODUCTION'
-      },
+      order: andWhere(
+        { status: 'IN_PRODUCTION' },
+        await orderListScope(req),
+      ),
       productionStartDate: { not: null },
       productionEndDate: { not: null }
     };
@@ -107,9 +109,10 @@ router.get('/day/:date', authenticate, async (req: AuthRequest, res) => {
     nextDay.setDate(nextDay.getDate() + 1);
 
     const where: any = {
-      order: {
-        status: 'IN_PRODUCTION'
-      },
+      order: andWhere(
+        { status: 'IN_PRODUCTION' },
+        await orderListScope(req),
+      ),
       productionStartDate: { not: null },
       productionEndDate: { not: null },
       AND: [
@@ -200,6 +203,8 @@ router.put('/item/:itemId', authenticate, async (req: AuthRequest, res) => {
     if (!existingItem) {
       return res.status(404).json({ error: 'Позиция заказа не найдена' });
     }
+
+    if (await rejectIfOrderHidden(req, res, existingItem.orderId)) return;
 
     const item = await prisma.orderItem.update({
       where: { id: itemId },

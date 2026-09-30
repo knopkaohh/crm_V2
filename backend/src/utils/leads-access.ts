@@ -1,9 +1,14 @@
 import { AuthRequest } from '../middleware/auth';
+import { isIsolatedRole } from './isolated-access';
 
 const HARD_DELETE_ROLES = new Set(['EXECUTIVE', 'ADMIN']);
 
-/** Все контакты: любой авторизованный пользователь CRM. */
+/**
+ * Все контакты: любой авторизованный пользователь CRM.
+ * Изолированный кабинет видит только свои — для остальных ролей условие прежнее.
+ */
 export function canViewAllLeads(req: AuthRequest): boolean {
+  if (isIsolatedRole(req.userRole)) return false;
   return Boolean(req.userId);
 }
 

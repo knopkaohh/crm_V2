@@ -2,6 +2,7 @@ import express from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { canAccessLeadByManager } from '../utils/leads-access';
+import { rejectIfLeadHidden } from '../utils/isolated-access';
 
 const router = express.Router();
 
@@ -27,6 +28,7 @@ router.get('/leads/:leadId', authenticate, async (req: AuthRequest, res) => {
     if (!canAccessLeadByManager(req, lead.managerId)) {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
+    if (await rejectIfLeadHidden(req, res, lead)) return;
 
     // Ищем существующий чат
     let chat = await prisma.chat.findUnique({
@@ -122,6 +124,7 @@ router.post('/leads/:leadId/messages', authenticate, async (req: AuthRequest, re
     if (!canAccessLeadByManager(req, lead.managerId)) {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
+    if (await rejectIfLeadHidden(req, res, lead)) return;
 
     // Получаем или создаем чат
     let chat = await prisma.chat.findUnique({
@@ -194,6 +197,7 @@ router.get('/leads/:leadId/messages', authenticate, async (req: AuthRequest, res
     if (!canAccessLeadByManager(req, lead.managerId)) {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
+    if (await rejectIfLeadHidden(req, res, lead)) return;
 
     // Получаем чат
     const chat = await prisma.chat.findUnique({

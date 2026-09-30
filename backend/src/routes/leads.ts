@@ -8,6 +8,14 @@ import {
 import { prisma } from '../utils/prisma';
 import { generateOrderNumber } from '../utils/order-utils';
 import { canViewAllLeads, canDeleteLead, canAccessLeadByManager } from '../utils/leads-access';
+import {
+  andWhere,
+  isIsolatedRole,
+  ISOLATED_ROLE,
+  leadListScope,
+  rejectIfClientHidden,
+  rejectIfLeadHidden,
+} from '../utils/isolated-access';
 
 const router = express.Router();
 
@@ -78,6 +86,8 @@ router.get('/', authenticate, async (req, res) => {
       ];
     }
 
+    const scopedWhere = andWhere(where, await leadListScope(authReq));
+
     // Определяем порядок сортировки
     let orderBy: any = { createdAt: 'desc' };
     if (contactDateFilter === 'future') {
@@ -86,7 +96,7 @@ router.get('/', authenticate, async (req, res) => {
 
     const [leads, total] = await Promise.all([
       prisma.lead.findMany({
-        where,
+        where: scopedWhere,
         include: {
           client: {
             select: {
@@ -120,7 +130,7 @@ router.get('/', authenticate, async (req, res) => {
         skip,
         take: limitNum,
       }),
-      prisma.lead.count({ where }),
+      prisma.lead.count({ where: scopedWhere }),
     ]);
 
     res.json({
@@ -139,8 +149,16 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 /** Список пользователей для фильтра «Менеджер» на вкладке Контакты */
-router.get('/managers', authenticate, async (_req, res) => {
+router.get('/managers', authenticate, async (req: AuthRequest, res) => {
   try {
+    if (isIsolatedRole(req.userRole)) {
+      const me = await prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { id: true, firstName: true, lastName: true, role: true },
+      });
+      return res.json(me ? [me] : []);
+    }
+
     const users = await prisma.user.findMany({
       where: { isActive: true },
       select: {
@@ -151,7 +169,7 @@ router.get('/managers', authenticate, async (_req, res) => {
       },
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     });
-    res.json(users);
+    res.json(users.filter((user) => user.role !== ISOLATED_ROLE));
   } catch (error) {
     console.error('Get lead managers error:', error);
     res.status(500).json({ error: 'Ошибка при загрузке списка менеджеров' });
@@ -245,6 +263,8 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 
+    if (await rejectIfLeadHidden(req, res, lead)) return;
+
     res.json(lead);
   } catch (error) {
     console.error('Get lead error:', error);
@@ -261,11 +281,14 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Клиент обязателен' });
     }
 
+    if (await rejectIfClientHidden(req, res, clientId)) return;
+    const resolvedManagerId = isIsolatedRole(req.userRole) ? req.userId! : (managerId || req.userId!);
+
     const lead = await prisma.lead.create({
       data: {
         clientId,
         status: status || 'NEW_LEAD',
-        managerId: managerId || req.userId!,
+        managerId: resolvedManagerId,
         creatorId: req.userId!,
         value: value ? parseFloat(value) : null,
         description,
@@ -286,9 +309,9 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     });
 
     // Уведомление менеджеру
-    if (managerId && managerId !== req.userId) {
+    if (!isIsolatedRole(req.userRole) && resolvedManagerId && resolvedManagerId !== req.userId) {
       await sendNotification(
-        managerId,
+        resolvedManagerId,
         'Новый лид',
         `Вам назначен новый лид от ${lead.client.name}`,
         'lead',
@@ -309,7 +332,9 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       });
     }
 
-    broadcastLeadUpdate(lead.id, lead);
+    if (!isIsolatedRole(req.userRole)) {
+      broadcastLeadUpdate(lead.id, lead);
+    }
 
     res.status(201).json(lead);
   } catch (error) {
@@ -337,9 +362,11 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 
+    if (await rejectIfLeadHidden(req, res, existingLead)) return;
+
     const updateData: any = {};
     if (status !== undefined) updateData.status = status;
-    if (managerId !== undefined) updateData.managerId = managerId;
+    if (managerId !== undefined && !isIsolatedRole(req.userRole)) updateData.managerId = managerId;
     if (value !== undefined) updateData.value = value ? parseFloat(value) : null;
     if (description !== undefined) updateData.description = description;
     if (source !== undefined) updateData.source = source;
@@ -396,7 +423,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
     });
 
     // Уведомление при смене менеджера
-    if (managerId && managerId !== existingLead.managerId && managerId !== req.userId) {
+    if (!isIsolatedRole(req.userRole) && managerId && managerId !== existingLead.managerId && managerId !== req.userId) {
       await sendNotification(
         managerId,
         'Новый лид',
@@ -429,7 +456,9 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
       });
     }
 
-    broadcastLeadUpdate(lead.id, lead);
+    if (!isIsolatedRole(req.userRole)) {
+      broadcastLeadUpdate(lead.id, lead);
+    }
 
     res.json(lead);
   } catch (error) {
@@ -463,6 +492,8 @@ router.post('/:id/close', authenticate, async (req: AuthRequest, res) => {
     if (!canAccessLeadByManager(req, lead.managerId)) {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
+
+    if (await rejectIfLeadHidden(req, res, lead)) return;
 
     const result = await prisma.$transaction(async (tx) => {
       const closedContact = await tx.closedContact.create({
@@ -543,6 +574,7 @@ router.post('/:id/comments', authenticate, async (req: AuthRequest, res) => {
     if (!canAccessLeadByManager(req, leadForComment.managerId)) {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
+    if (await rejectIfLeadHidden(req, res, leadForComment)) return;
 
     const comment = await prisma.comment.create({
       data: {

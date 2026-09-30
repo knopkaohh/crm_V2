@@ -56,10 +56,15 @@ export const notifyAllUsersAboutNewOrder = async (payload: NewOrderNotificationP
       },
       select: {
         telegramChatId: true,
+        role: true,
       },
     });
 
-    if (!users.length) {
+    const recipients = users.filter(
+      (user) => user.role !== 'ISOLATED' && !!user.telegramChatId,
+    );
+
+    if (!recipients.length) {
       console.log('[Telegram] No users with telegramChatId to notify about new order');
       return;
     }
@@ -74,9 +79,7 @@ export const notifyAllUsersAboutNewOrder = async (payload: NewOrderNotificationP
     const text = textLines.join('\n');
 
     await Promise.all(
-      users
-        .filter((u) => !!u.telegramChatId)
-        .map((u) => sendTelegramMessage(u.telegramChatId as string, text)),
+      recipients.map((u) => sendTelegramMessage(u.telegramChatId as string, text)),
     );
   } catch (error) {
     console.error('[Telegram] Failed to broadcast new order notification:', {

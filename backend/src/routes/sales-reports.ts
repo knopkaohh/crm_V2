@@ -13,6 +13,7 @@ import {
   parseDateOnly,
   parsePeriodMonth,
 } from '../utils/sales-report-participants';
+import { isIsolatedRole } from '../utils/isolated-access';
 
 const router = express.Router();
 
@@ -68,8 +69,16 @@ function aggregateChannels(
 }
 
 // Участники отчёта (фиксированный порядок)
-router.get('/participants', authenticate, async (_req, res) => {
+router.get('/participants', authenticate, async (req: AuthRequest, res) => {
   try {
+    if (isIsolatedRole(req.userRole)) {
+      const me = await prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { id: true, email: true, firstName: true, lastName: true },
+      });
+      return res.json(me ? [me] : []);
+    }
+
     const participants = await loadParticipants();
     res.json(participants);
   } catch (error) {
@@ -106,7 +115,14 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
       if (d < end) end = d;
     }
 
-    const participants = await loadParticipants();
+    let participants = await loadParticipants();
+    if (isIsolatedRole(req.userRole)) {
+      const me = await prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { id: true, email: true, firstName: true, lastName: true },
+      });
+      participants = me ? [me] : [];
+    }
     const participantIds = participants.map((p) => p.id);
     const allowedIds = managerIdFilter
       ? participantIds.filter((id) => id === managerIdFilter)
@@ -209,7 +225,10 @@ router.get('/day', authenticate, async (req: AuthRequest, res) => {
     const date = parseDateOnly(dateNorm)!;
 
     const participants = await loadParticipants();
-    if (!participants.some((p) => p.id === managerId)) {
+    const inReport = isIsolatedRole(req.userRole)
+      ? managerId === req.userId
+      : participants.some((p) => p.id === managerId);
+    if (!inReport) {
       return res.status(400).json({ error: 'Менеджер не участвует в отчёте' });
     }
 
@@ -261,7 +280,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 
     const managerId = req.userId!;
     const participants = await loadParticipants();
-    if (!participants.some((p) => p.id === managerId)) {
+    if (!isIsolatedRole(req.userRole) && !participants.some((p) => p.id === managerId)) {
       return res.status(403).json({ error: 'Вы не участвуете в отчёте по продажам' });
     }
 

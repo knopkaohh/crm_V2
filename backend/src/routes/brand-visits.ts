@@ -3,6 +3,14 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 import { BrandVisitStage } from '@prisma/client';
 import { sortFunnelManagers } from '../utils/funnel-managers';
+import {
+  andWhere,
+  getIsolatedUserIds,
+  isIsolatedRole,
+  ISOLATED_ROLE,
+  isolatedFunnelScope,
+  managerExclusion,
+} from '../utils/isolated-access';
 
 const router = express.Router();
 
@@ -33,8 +41,16 @@ const visitInclude = {
   },
 } as const;
 
-router.get('/managers', authenticate, async (_req, res) => {
+router.get('/managers', authenticate, async (req: AuthRequest, res) => {
   try {
+    if (isIsolatedRole(req.userRole)) {
+      const me = await prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { id: true, firstName: true, lastName: true, email: true, role: true },
+      });
+      return res.json(me ? [me] : []);
+    }
+
     const users = await prisma.user.findMany({
       where: { isActive: true },
       select: {
@@ -45,20 +61,25 @@ router.get('/managers', authenticate, async (_req, res) => {
         role: true,
       },
     });
-    res.json(sortFunnelManagers(users));
+    res.json(sortFunnelManagers(users.filter((user) => user.role !== ISOLATED_ROLE)));
   } catch (error) {
     console.error('brand-visits managers error:', error);
     res.status(500).json({ error: 'Ошибка при загрузке менеджеров' });
   }
 });
 
-router.get('/', authenticate, async (req, res) => {
+router.get('/', authenticate, async (req: AuthRequest, res) => {
   try {
     const { managerId } = req.query;
 
-    const where: { managerId?: string } = {};
-    if (managerId && typeof managerId === 'string' && managerId !== 'ALL') {
-      where.managerId = managerId;
+    let where: Record<string, unknown> = {};
+    if (isIsolatedRole(req.userRole) && req.userId) {
+      where = isolatedFunnelScope(req.userId);
+    } else {
+      if (managerId && typeof managerId === 'string' && managerId !== 'ALL') {
+        where.managerId = managerId;
+      }
+      where = andWhere(where, managerExclusion(await getIsolatedUserIds()));
     }
 
     const rows = await prisma.brandVisit.findMany({
@@ -285,6 +306,10 @@ router.post('/batch', authenticate, async (req: AuthRequest, res) => {
 
     if (cleaned.length === 0) {
       return res.status(400).json({ error: 'Заполните название бренда и менеджера хотя бы в одной строке' });
+    }
+
+    if (isIsolatedRole(req.userRole)) {
+      for (const row of cleaned) row.managerId = req.userId!;
     }
 
     const managerIds = [...new Set(cleaned.map((i) => i.managerId))];

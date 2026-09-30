@@ -6,6 +6,15 @@ import { isTaskPrivilegedRole } from '../utils/task-exclusions';
 import { sendNotification } from '../utils/socket';
 import { prisma } from '../utils/prisma';
 import { parsePeriodMonth } from '../utils/sales-report-participants';
+import {
+  andWhere,
+  creatorExclusion,
+  getIsolatedUserIds,
+  isIsolatedRole,
+  isolatedTaskScope,
+  rejectIfLeadHidden,
+  rejectIfOrderHidden,
+} from '../utils/isolated-access';
 
 const router = express.Router();
 
@@ -40,8 +49,16 @@ function applyClosedAtOnStatusChange(
 }
 
 // Менеджеры для доски задач
-router.get('/board-managers', authenticate, async (_req, res) => {
+router.get('/board-managers', authenticate, async (req: AuthRequest, res) => {
   try {
+    if (isIsolatedRole(req.userRole)) {
+      const me = await prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { id: true, firstName: true, lastName: true },
+      });
+      return res.json(me ? [me] : []);
+    }
+
     const managers = await getTaskBoardManagers();
     res.json(
       managers.map((m) => ({
@@ -70,7 +87,13 @@ router.get('/stats', authenticate, async (req: AuthRequest, res) => {
     const privileged = isTaskPrivilegedRole(req.userRole);
 
     let targetManagers = managers;
-    if (!privileged) {
+    if (isIsolatedRole(req.userRole)) {
+      const me = await prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { id: true, firstName: true, lastName: true, email: true },
+      });
+      targetManagers = me ? [me] : [];
+    } else if (!privileged) {
       targetManagers = managers.filter((m) => m.id === req.userId);
     } else if (managerIdFilter) {
       targetManagers = managers.filter((m) => m.id === managerIdFilter);
@@ -214,7 +237,9 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
     }
 
     if (boardMode) {
-      const boardAssigneeId = (assigneeId as string) || req.userId!;
+      const boardAssigneeId = isIsolatedRole(req.userRole)
+        ? req.userId!
+        : ((assigneeId as string) || req.userId!);
       await ensureMassTasksForUser(boardAssigneeId);
       where.assigneeId = boardAssigneeId;
 
@@ -258,8 +283,16 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
       where.status = { not: 'COMPLETED' };
     }
 
+    let scopedWhere: Record<string, unknown> = where;
+    if (isIsolatedRole(req.userRole) && req.userId) {
+      scopedWhere = andWhere(where, isolatedTaskScope(req.userId));
+    } else {
+      const hideCreators = creatorExclusion(await getIsolatedUserIds());
+      if (hideCreators) scopedWhere = andWhere(where, hideCreators);
+    }
+
     const tasks = await prisma.task.findMany({
-      where,
+      where: scopedWhere,
       include: {
         creator: {
           select: { id: true, firstName: true, lastName: true },
@@ -346,6 +379,17 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Задача не найдена' });
     }
 
+    if (isIsolatedRole(req.userRole)) {
+      if (task.creatorId !== req.userId && task.assigneeId !== req.userId) {
+        return res.status(404).json({ error: 'Задача не найдена' });
+      }
+    } else {
+      const isolatedIds = await getIsolatedUserIds();
+      if (isolatedIds.includes(task.creatorId)) {
+        return res.status(404).json({ error: 'Задача не найдена' });
+      }
+    }
+
     res.json(task);
   } catch (error) {
     console.error('Get task error:', error);
@@ -362,13 +406,29 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'Название задачи обязательно' });
     }
 
+    if (isIsolatedRole(req.userRole)) {
+      if (orderId && (await rejectIfOrderHidden(req, res, orderId))) return;
+      if (leadId) {
+        const lead = await prisma.lead.findUnique({
+          where: { id: leadId },
+          select: { managerId: true, creatorId: true },
+        });
+        if (!lead) {
+          return res.status(404).json({ error: 'Лид не найден' });
+        }
+        if (await rejectIfLeadHidden(req, res, lead)) return;
+      }
+    }
+
+    const resolvedAssigneeId = isIsolatedRole(req.userRole) ? req.userId : (assigneeId || req.userId);
+
     const task = await prisma.task.create({
       data: {
         title,
         description,
         priority: priority || 0,
         creatorId: req.userId!,
-        assigneeId: assigneeId || req.userId,
+        assigneeId: resolvedAssigneeId,
         dueDate: dueDate ? new Date(dueDate) : null,
         leadId,
         orderId,
@@ -379,7 +439,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       },
     });
 
-    const targetUserId = assigneeId || req.userId;
+    const targetUserId = resolvedAssigneeId;
     if (targetUserId) {
       await sendNotification(
         targetUserId,
@@ -415,12 +475,23 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Недостаточно прав доступа' });
     }
 
+    if (isIsolatedRole(req.userRole)) {
+      if (existingTask.creatorId !== req.userId && existingTask.assigneeId !== req.userId) {
+        return res.status(404).json({ error: 'Задача не найдена' });
+      }
+    } else {
+      const isolatedIds = await getIsolatedUserIds();
+      if (isolatedIds.includes(existingTask.creatorId)) {
+        return res.status(404).json({ error: 'Задача не найдена' });
+      }
+    }
+
     const updateData: Record<string, unknown> = {};
     if (title !== undefined) updateData.title = title;
     if (description !== undefined) updateData.description = description;
     applyClosedAtOnStatusChange(status, existingTask, updateData);
     if (priority !== undefined) updateData.priority = priority;
-    if (assigneeId !== undefined) updateData.assigneeId = assigneeId;
+    if (assigneeId !== undefined && !isIsolatedRole(req.userRole)) updateData.assigneeId = assigneeId;
     if (dueDate !== undefined) updateData.dueDate = dueDate ? new Date(dueDate) : null;
 
     const task = await prisma.task.update({

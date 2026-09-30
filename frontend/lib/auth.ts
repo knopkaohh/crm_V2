@@ -6,7 +6,7 @@ export interface User {
   firstName: string
   lastName: string
   phone?: string
-  role: 'SALES_MANAGER' | 'TECHNOLOGIST' | 'EXECUTIVE' | 'ADMIN'
+  role: 'SALES_MANAGER' | 'CLIENT_MANAGER' | 'TECHNOLOGIST' | 'EXECUTIVE' | 'ADMIN' | 'VAN_DAM_TERMINATOR' | 'ISOLATED'
   isActive: boolean
 }
 
