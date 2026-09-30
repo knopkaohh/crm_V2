@@ -301,12 +301,19 @@ export default function NewOrderPage() {
       }
 
       const totalAmount = formData.positions.reduce((sum, p) => sum + (parseFloat(p.amount || '0') || 0), 0)
-      const items = formData.positions.map((p) => ({
-        name: `${resolveOrderMaterial(p.material, p.materialOther)} ${p.size}`.trim(),
-        quantity: parseInt(p.quantity || '0') || 0,
-        price: parseFloat(p.amount || '0') || 0, // amount уже содержит итоговую стоимость позиции
-        desiredDeadline: p.deadline && p.deadline.trim() ? new Date(p.deadline).toISOString() : null,
-      }))
+      const items = formData.positions.map((p) => {
+        const material = resolveOrderMaterial(p.material, p.materialOther)
+        const size = p.size.trim()
+
+        return {
+          name: `${material} ${size}`.trim(),
+          quantity: parseInt(p.quantity || '0') || 0,
+          price: parseFloat(p.amount || '0') || 0, // amount уже содержит итоговую стоимость позиции
+          material,
+          notes: size ? `Размер: ${size}` : null,
+          desiredDeadline: p.deadline && p.deadline.trim() ? new Date(p.deadline).toISOString() : null,
+        }
+      })
       const payload: any = {
         clientId,
         status: 'NEW_ORDER',
