@@ -55,6 +55,7 @@ import projectSalesRoutes from './routes/project-sales';
 import brandVisitsRoutes from './routes/brand-visits';
 import salesReportRoutes from './routes/sales-reports';
 import massTaskTemplateRoutes from './routes/mass-task-templates';
+import weeklyPlanRoutes from './routes/weekly-plans';
 import { startLeadCallReminderCron } from './utils/lead-call-reminder-cron';
 
 app.use('/api/auth', authRoutes);
@@ -73,6 +74,7 @@ app.use('/api/project-sales', projectSalesRoutes);
 app.use('/api/brand-visits', brandVisitsRoutes);
 app.use('/api/sales-reports', salesReportRoutes);
 app.use('/api/mass-task-templates', massTaskTemplateRoutes);
+app.use('/api/weekly-plans', weeklyPlanRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
