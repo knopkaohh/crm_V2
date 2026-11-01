@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
@@ -8,6 +9,7 @@ import { auth, type User } from '@/lib/auth'
 import { getCurrentMonthInput, formatPeriodLabel } from '@/lib/sales-report'
 import {
   ClipboardList,
+  CalendarRange,
   Plus,
   UserRound,
   X,
@@ -547,6 +549,22 @@ export default function WorkTasksPage() {
             )}
           </div>
         </div>
+
+        <Link
+          href="/work-tasks/planner"
+          className="flex items-center justify-between gap-4 rounded-2xl border-2 border-primary-600 bg-gradient-to-r from-primary-600 to-primary-700 px-5 py-4 text-white shadow-sm transition hover:from-primary-700 hover:to-primary-800"
+        >
+          <span className="flex items-center gap-3">
+            <CalendarRange className="h-7 w-7 shrink-0" />
+            <span>
+              <span className="block text-base font-semibold">Планировщик задач</span>
+              <span className="block text-sm text-primary-100">
+                Недельные планы отдела продаж: понедельник — пятница
+              </span>
+            </span>
+          </span>
+          <ChevronRight className="h-5 w-5 shrink-0" />
+        </Link>
 
         {!canEditBoard && !privileged && (
           <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2">

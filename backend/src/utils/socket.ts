@@ -101,3 +101,8 @@ export const broadcastOrderUpdate = (orderId: string, data: any) => {
 export const broadcastLeadUpdate = (leadId: string, data: any) => {
   io.emit('lead-update', { leadId, ...data });
 };
+
+/** Обновление недельного планировщика для всех открытых страниц этой недели. */
+export const broadcastWeeklyPlanUpdate = (weekStart: string) => {
+  io.emit('weekly-plan-update', { weekStart });
+};

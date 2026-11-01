@@ -120,6 +120,8 @@ model User {
   dailySalesReports     DailySalesReport[]
   massTaskTemplatesCreated MassTaskTemplate[] @relation("MassTaskTemplateCreator")
   massTaskTemplateAssignments MassTaskTemplateManager[]
+  weeklyPlanTasks         WeeklyPlanTask[] @relation("WeeklyPlanManager")
+  weeklyPlanTasksCreated  WeeklyPlanTask[] @relation("WeeklyPlanCreator")
 
   @@index([email])
   @@index([role])
@@ -717,4 +719,28 @@ model DailySalesReport {
   @@index([date])
   @@index([managerId])
   @@map("daily_sales_reports")
+}
+
+// Недельный планировщик отдела продаж. Неделя — понедельник (календарная дата),
+// день — 1..5 (пн–пт). Завершение недели ничего не удаляет: прошлые строки остаются архивом.
+model WeeklyPlanTask {
+  id          String    @id @default(uuid())
+  weekStart   DateTime  @db.Date
+  managerId   String
+  dayOfWeek   Int
+  title       String
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  createdById String
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  manager   User @relation("WeeklyPlanManager", fields: [managerId], references: [id], onDelete: Restrict)
+  createdBy User @relation("WeeklyPlanCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([weekStart])
+  @@index([managerId])
+  @@index([weekStart, managerId, dayOfWeek])
+  @@map("weekly_plan_tasks")
 }
