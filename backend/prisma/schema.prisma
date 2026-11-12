@@ -355,6 +355,13 @@ model OrderItem {
   density        String? // Плотность: 120мкм, 140мкм
   bagColor       String? // Цвет пакета: Белый, Черный
   sliderColor    String? // Цвет бегунка: Белый, Черный
+
+  // Бумажные пакеты, пуллеры и стикеры
+  foiling        String? // Фольгирование: Да/Нет
+  handles        String? // Ручки: Репс/Шнур
+  productBase    String? // Основа: пуллер или материал стикера
+  stickerShape   String? // Форма стикера
+  lamination     String? // Ламинация стикера
   
   desiredDeadline DateTime? // Желаемый срок
   productionComments String? // Комментарии
