@@ -17,6 +17,18 @@ import {
   CheckCircle2
 } from 'lucide-react'
 import api from '@/lib/api'
+import {
+  BAG_HANDLE_OPTIONS,
+  OTHER_COLOR_OPTIONS,
+  PULLER_BASE_OPTIONS,
+  STICKER_BASE_OPTIONS,
+  STICKER_LAMINATION_OPTIONS,
+  STICKER_PRINT_OPTIONS,
+  STICKER_SHAPE_OPTIONS,
+  productionFormKind,
+  productionParamFields,
+  resolveProductionMaterial,
+} from '@/lib/order-materials'
 
 interface OrderItem {
   id?: string
@@ -62,6 +74,11 @@ interface ProductionParams {
   bagColor?: string
   bagColorCustom?: string
   sliderColor?: string
+  foiling?: string
+  handles?: string
+  productBase?: string
+  stickerShape?: string
+  lamination?: string
   desiredDeadline?: string
   productionComments?: string
 }
@@ -73,30 +90,88 @@ interface SendToProductionModalProps {
   onSuccess: () => void
 }
 
-// Определение материала из названия позиции
-function extractMaterial(itemName: string): string {
-  const materials = [
-    'Сатин классический',
-    'Сатин премиум',
-    'Силикон',
-    'Хлопок',
-    'Нейлон',
-    'ДТФ наклейки',
-    'Флекстран',
-    'Жаккард',
-    'Картонная навесная бирка',
-    'ZIP-Lock пакет',
-    'ПВХ Патч',
-  ]
-  
-  for (const material of materials) {
-    if (itemName.includes(material)) {
-      if (material === 'Картонная навесная бирка') return 'Картон'
-      return material
-    }
-  }
-  
-  return ''
+function ColorChoice({
+  label,
+  value,
+  custom,
+  options,
+  customOption,
+  onChange,
+  onCustom,
+}: {
+  label: string
+  value?: string
+  custom?: string
+  options: readonly string[]
+  customOption: string
+  onChange: (value: string) => void
+  onCustom: (value: string) => void
+}) {
+  return (
+    <div className="bg-gradient-to-br from-gray-50 to-gray-100/50 rounded-xl p-5 border border-gray-200">
+      <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-3">
+        <Palette className="h-4 w-4 text-primary-600" />
+        {label}
+      </label>
+      <select
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-4 py-3 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all font-medium"
+        required
+      >
+        <option value="">Выберите цвет</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+      {value === customOption && (
+        <input
+          type="text"
+          placeholder="Укажите цвет вручную"
+          value={custom || ''}
+          onChange={(e) => onCustom(e.target.value)}
+          className="w-full mt-3 px-4 py-3 bg-white border-2 border-primary-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all font-medium"
+          required
+        />
+      )}
+    </div>
+  )
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value?: string
+  options: readonly string[]
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="bg-gradient-to-br from-gray-50 to-gray-100/50 rounded-xl p-5 border border-gray-200">
+      <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-3">
+        <Package className="h-4 w-4 text-primary-600" />
+        {label}
+      </label>
+      <select
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-4 py-3 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all font-medium"
+        required
+      >
+        <option value="">Выберите</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
 }
 
 // Форматирование даты для ключа
@@ -151,6 +226,11 @@ export default function SendToProductionModal({
           coating: [],
           singleSidedPrint: false,
           doubleSidedPrint: false,
+          foiling: '',
+          handles: '',
+          productBase: '',
+          stickerShape: '',
+          lamination: '',
           desiredDeadline: desiredDeadline, // Используем срок из заказа или пустую строку
           productionComments: ''
         }
@@ -235,109 +315,24 @@ export default function SendToProductionModal({
         const item = order.items.find(i => i.id === itemId)
         if (!item) continue
         
-        const material = extractMaterial(item.name || '')
+        const material = resolveProductionMaterial(item)
         const updateData: any = {
           material,
           designCount: params.designCount,
           desiredDeadline: params.desiredDeadline ? convertDateToISO(params.desiredDeadline) : null,
-          productionComments: params.productionComments || null
+          productionComments: params.productionComments || null,
+          ...productionParamFields(material, params),
         }
-        
-        // Поля в зависимости от материала
-        if (
-          [
-            'Сатин классический',
-            'Сатин премиум',
-            'Силикон',
-            'Хлопок',
-            'Нейлон',
-            'ДТФ наклейки',
-            'Флекстран',
-            'Жаккард',
-          ].includes(material)
-        ) {
-          updateData.baseColor = params.baseColor || null
-          updateData.baseColorCustom = params.baseColor === 'Цветной' ? (params.baseColorCustom || null) : null
-          updateData.printColor = params.printColor || null
-          updateData.printColorCustom = params.printColor === 'Цветной' ? (params.printColorCustom || null) : null
-          
-          if (material === 'Жаккард') {
-            // Для Жаккарда: резки НЕТ, но есть подгибка по центру и свободный край
-            updateData.cutting = null
-            updateData.centerFold = params.centerFold ? 'Да' : 'Нет'
-            updateData.freeEdge = params.freeEdge ? 'Да' : 'Нет'
-          } else {
-            // Для Сатина, Силикона, Хлопка, Нейлона, ДТФ наклеек, Флекстрана: резка есть, подгибки нет
-            updateData.cutting = params.cutting ? 'Да' : 'Нет'
-            updateData.centerFold = null
-            updateData.freeEdge = null
-          }
-          // Очищаем поля картона
-          updateData.postProcessing = null
-          updateData.coating = null
-          updateData.singleSidedPrint = null
-          updateData.doubleSidedPrint = null
-        } else if (material === 'Картон') {
-          // Постобработка и покрытие теперь массивы - сохраняем как строку с разделителями
-          updateData.postProcessing = params.postProcessing && params.postProcessing.length > 0 
-            ? params.postProcessing.join(', ') 
-            : null
-          updateData.coating = params.coating && params.coating.length > 0 
-            ? params.coating.join(', ') 
-            : null
-          // Печать - отправляем boolean значения (false если не выбрано)
-          updateData.singleSidedPrint = params.singleSidedPrint === true
-          updateData.doubleSidedPrint = params.doubleSidedPrint === true
-          // Очищаем поля других материалов
-          updateData.baseColor = null
-          updateData.baseColorCustom = null
-          updateData.printColor = null
-          updateData.printColorCustom = null
-          updateData.cutting = null
-          updateData.centerFold = null
-          updateData.freeEdge = null
-        } else if (material === 'ZIP-Lock пакет') {
+
+        if (productionFormKind(material) === 'ziplock') {
           const zipPrintColor = params.printColor === 'Другой'
             ? (params.printColorCustom || null)
             : (params.printColor || null)
-          const zipBagColor = params.bagColor === 'Другой'
-            ? (params.bagColorCustom || null)
-            : (params.bagColor || null)
-
           const zipDetails: string[] = []
           if (params.printType) zipDetails.push(`Тип печати: ${params.printType}`)
           if (zipPrintColor) zipDetails.push(`Цвет печати: ${zipPrintColor}`)
           if (params.productionComments) zipDetails.push(`Комментарий: ${params.productionComments}`)
-
-          updateData.density = params.density || null
-          updateData.bagColor = zipBagColor
-          updateData.sliderColor = params.sliderColor || null
-          updateData.printColor = params.printColor || null
-          updateData.printColorCustom = params.printColor === 'Другой' ? (params.printColorCustom || null) : null
           updateData.productionComments = zipDetails.length > 0 ? zipDetails.join('\n') : null
-          // Очищаем поля других материалов
-          updateData.baseColor = null
-          updateData.baseColorCustom = null
-          updateData.cutting = null
-          updateData.centerFold = null
-          updateData.freeEdge = null
-          updateData.postProcessing = null
-          updateData.coating = null
-          updateData.singleSidedPrint = null
-          updateData.doubleSidedPrint = null
-        } else {
-          // Для материалов, которые не распознаны, очищаем все поля
-          updateData.baseColor = null
-          updateData.baseColorCustom = null
-          updateData.printColor = null
-          updateData.printColorCustom = null
-          updateData.cutting = null
-          updateData.centerFold = null
-          updateData.freeEdge = null
-          updateData.postProcessing = null
-          updateData.coating = null
-          updateData.singleSidedPrint = null
-          updateData.doubleSidedPrint = null
         }
         
         // Удаляем undefined значения
@@ -505,20 +500,17 @@ export default function SendToProductionModal({
                 const itemId = item.id
                 if (!itemId) return null
 
-                const material = extractMaterial(item.name || '')
+                const material = resolveProductionMaterial(item)
                 const params = itemParams[itemId] || {}
-                const isSatinSiliconCotton = [
-                  'Сатин классический',
-                  'Сатин премиум',
-                  'Силикон',
-                  'Хлопок',
-                  'Нейлон',
-                  'ДТФ наклейки',
-                  'Флекстран',
-                ].includes(material)
-                const isJacquard = material === 'Жаккард'
-                const isCardboard = material === 'Картон'
-                const isZipLock = material === 'ZIP-Lock пакет'
+                const formKind = productionFormKind(material)
+                const isSatinSiliconCotton = formKind === 'textile'
+                const isJacquard = formKind === 'jacquard'
+                const isCardboard = formKind === 'cardboard'
+                const isZipLock = formKind === 'ziplock'
+                const isPvdBag = formKind === 'pvd-bag'
+                const isPaperBag = formKind === 'paper-bag'
+                const isPuller = formKind === 'puller'
+                const isSticker = formKind === 'sticker'
                 const showCalendarForItem = showCalendar[itemId] && selectedItemForCalendar === itemId
                 const hasMaterial = material !== ''
 
@@ -685,7 +677,11 @@ export default function SendToProductionModal({
                       <div className="space-y-5">
                         <div className="flex items-center gap-2 text-sm font-bold text-gray-700 mb-4 pt-3 border-t-2 border-gray-200">
                           <Package className="h-5 w-5 text-primary-600" />
-                          Параметры картона
+                          {material === 'Листовки'
+                            ? 'Параметры листовки'
+                            : material === 'Буклеты'
+                              ? 'Параметры буклета'
+                              : 'Параметры картона'}
                         </div>
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -756,6 +752,106 @@ export default function SendToProductionModal({
                               <span className="text-sm text-gray-700">Двухсторонняя печать</span>
                             </label>
                           </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {(isPvdBag || isPaperBag) && (
+                      <div className="space-y-5">
+                        <div className="flex items-center gap-2 text-sm font-bold text-gray-700 mb-4 pt-3 border-t-2 border-gray-200">
+                          <Package className="h-5 w-5 text-primary-600" />
+                          {isPvdBag ? 'Параметры ПВД пакета' : 'Параметры бумажного пакета'}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                          <ColorChoice
+                            label="Цвет основы"
+                            value={params.baseColor}
+                            custom={params.baseColorCustom}
+                            options={OTHER_COLOR_OPTIONS}
+                            customOption="Другой"
+                            onChange={(value) => updateItemParam(itemId, 'baseColor', value)}
+                            onCustom={(value) => updateItemParam(itemId, 'baseColorCustom', value)}
+                          />
+                          <ColorChoice
+                            label="Цвет печати"
+                            value={params.printColor}
+                            custom={params.printColorCustom}
+                            options={OTHER_COLOR_OPTIONS}
+                            customOption="Другой"
+                            onChange={(value) => updateItemParam(itemId, 'printColor', value)}
+                            onCustom={(value) => updateItemParam(itemId, 'printColorCustom', value)}
+                          />
+                          {isPaperBag && (
+                            <>
+                              <SelectField
+                                label="Фольгирование"
+                                value={params.foiling}
+                                options={['Да', 'Нет']}
+                                onChange={(value) => updateItemParam(itemId, 'foiling', value)}
+                              />
+                              <SelectField
+                                label="Ручки"
+                                value={params.handles}
+                                options={BAG_HANDLE_OPTIONS}
+                                onChange={(value) => updateItemParam(itemId, 'handles', value)}
+                              />
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {isPuller && (
+                      <div className="space-y-5">
+                        <div className="flex items-center gap-2 text-sm font-bold text-gray-700 mb-4 pt-3 border-t-2 border-gray-200">
+                          <Package className="h-5 w-5 text-primary-600" />
+                          Параметры пуллера
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                          <SelectField
+                            label="Основа"
+                            value={params.productBase}
+                            options={PULLER_BASE_OPTIONS}
+                            onChange={(value) => updateItemParam(itemId, 'productBase', value)}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {isSticker && (
+                      <div className="space-y-5">
+                        <div className="flex items-center gap-2 text-sm font-bold text-gray-700 mb-4 pt-3 border-t-2 border-gray-200">
+                          <Package className="h-5 w-5 text-primary-600" />
+                          Параметры стикера
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                          <SelectField
+                            label="Основа"
+                            value={params.productBase}
+                            options={STICKER_BASE_OPTIONS}
+                            onChange={(value) => updateItemParam(itemId, 'productBase', value)}
+                          />
+                          <SelectField
+                            label="Форма"
+                            value={params.stickerShape}
+                            options={STICKER_SHAPE_OPTIONS}
+                            onChange={(value) => updateItemParam(itemId, 'stickerShape', value)}
+                          />
+                          <ColorChoice
+                            label="Цвет печати"
+                            value={params.printColor}
+                            custom={params.printColorCustom}
+                            options={STICKER_PRINT_OPTIONS}
+                            customOption="Другой"
+                            onChange={(value) => updateItemParam(itemId, 'printColor', value)}
+                            onCustom={(value) => updateItemParam(itemId, 'printColorCustom', value)}
+                          />
+                          <SelectField
+                            label="Ламинация"
+                            value={params.lamination}
+                            options={STICKER_LAMINATION_OPTIONS}
+                            onChange={(value) => updateItemParam(itemId, 'lamination', value)}
+                          />
                         </div>
                       </div>
                     )}
