@@ -79,22 +79,13 @@ const formatMoney = (value: number) =>
 interface ProposalModalProps {
   open: boolean
   lead: FunnelLead | null
-  leads: FunnelLead[]
   onClose: () => void
   onCompleted: (leadId: string, movedToWaiting: boolean) => void
-}
-
-function findLeadByName(name: string, leads: FunnelLead[]): FunnelLead | null {
-  const needle = name.trim().toLowerCase()
-  if (!needle) return null
-  const matches = leads.filter((item) => item.client.name.trim().toLowerCase() === needle)
-  return matches.length === 1 ? matches[0] : null
 }
 
 export default function ProposalModal({
   open,
   lead,
-  leads,
   onClose,
   onCompleted,
 }: ProposalModalProps) {
@@ -199,18 +190,14 @@ export default function ProposalModal({
   }
 
   const handleSubmit = async () => {
-    const target = lead ?? findLeadByName(form.clientName, leads)
-    if (!target) {
-      alert('Контакт с таким ФИО не найден. Проверьте имя или откройте КП с карточки клиента.')
-      return
-    }
     setSaving(true)
     try {
       const response = await api.post(
-        `/leads/${target.id}/proposal`,
+        '/leads/proposal-file',
         {
           ...form,
-          moveToWaiting,
+          leadId: lead?.id,
+          moveToWaiting: Boolean(lead) && moveToWaiting,
           items: form.items.map((item) => ({
             name: item.name,
             detail: item.detail,
@@ -220,9 +207,9 @@ export default function ProposalModal({
         },
         { responseType: 'blob' },
       )
-      const fileName = `КП ${form.productLine || 'Бирка Маркет'} — ${target.client.name}.pdf`
+      const fileName = `КП ${form.productLine || 'Бирка Маркет'} — ${form.clientName || 'клиент'}.pdf`
       await showInvoicePdfFromBlob(response.data, fileName, null)
-      onCompleted(target.id, moveToWaiting)
+      onCompleted(lead?.id ?? '', Boolean(lead) && moveToWaiting)
     } catch (error: any) {
       console.error('Failed to create proposal:', error)
       let message = 'Не удалось сформировать КП'
@@ -455,6 +442,7 @@ export default function ProposalModal({
             </label>
           </div>
 
+          {lead ? (
           <label className="flex items-start gap-2 text-sm text-gray-700">
             <input
               type="checkbox"
@@ -464,6 +452,7 @@ export default function ProposalModal({
             />
             <span>После скачивания перевести контакт в «Ждём клиента»</span>
           </label>
+          ) : null}
         </div>
 
         <div className="flex justify-end gap-2 border-t border-gray-200 bg-gray-50 px-6 py-4">

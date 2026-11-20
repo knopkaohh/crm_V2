@@ -751,6 +751,43 @@ router.get('/:id/proposal', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
+router.post('/proposal-file', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const parsed = parseProposalPayload(req.body);
+    if (parsed.error) {
+      return res.status(400).json({ error: parsed.error });
+    }
+
+    const leadId = typeof req.body?.leadId === 'string' ? req.body.leadId : '';
+    if (leadId && parsed.moveToWaiting) {
+      const lead = await prisma.lead.findUnique({
+        where: { id: leadId },
+        select: { id: true, managerId: true },
+      });
+      if (lead && canAccessLeadByManager(req, lead.managerId)) {
+        await prisma.lead.update({
+          where: { id: leadId },
+          data: { funnelStage: 'WAITING_CLIENT' },
+        });
+      }
+    }
+
+    const pdf = await generateProposalPdf(parsed);
+    const fileName = `КП ${parsed.productLine}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="proposal.pdf"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    );
+    res.send(pdf);
+  } catch (error) {
+    console.error('Create standalone proposal error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Ошибка при формировании коммерческого предложения' });
+    }
+  }
+});
+
 router.post('/:id/proposal', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;

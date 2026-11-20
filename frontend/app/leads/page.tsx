@@ -2050,7 +2050,6 @@ export default function LeadsPage() {
       <ProposalModal
         open={proposalOpen}
         lead={proposalLead}
-        leads={funnelLeads}
         onClose={() => {
           setProposalOpen(false)
           setProposalLead(null)
