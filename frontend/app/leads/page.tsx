@@ -231,6 +231,7 @@ const FILTER_SOURCE_OPTIONS = [
   'Теплые обзвоны',
   'Постоянные клиенты',
   'Сарафанное радио',
+  'Выставка',
 ]
 interface LeadManagerOption {
   id: string
@@ -1837,6 +1838,7 @@ export default function LeadsPage() {
                             <option value="Теплые обзвоны">Теплые обзвоны</option>
                             <option value="Постоянные клиенты">Постоянные клиенты</option>
                             <option value="Сарафанное радио">Сарафанное радио</option>
+                            <option value="Выставка">Выставка</option>
                           </select>
                         </div>
                         <div>
@@ -2503,6 +2505,7 @@ export default function LeadsPage() {
                   <option value="Avito">Avito</option>
                   <option value="Холодные обзвоны">Холодные обзвоны</option>
                   <option value="Сарафанное радио">Сарафанное радио</option>
+                  <option value="Выставка">Выставка</option>
                   <option value="Instagram">Instagram</option>
                   <option value="VK">VK</option>
                   <option value="WhatsApp">WhatsApp</option>

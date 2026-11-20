@@ -130,6 +130,7 @@ export default function NewLeadPage() {
               <option value="Avito">Avito</option>
               <option value="Холодные обзвоны">Холодные обзвоны</option>
               <option value="Сарафанное радио">Сарафанное радио</option>
+              <option value="Выставка">Выставка</option>
             </select>
           </div>
 

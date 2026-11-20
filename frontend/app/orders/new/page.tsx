@@ -28,6 +28,7 @@ const ORDER_SOURCES = [
   { value: 'Теплые обзвоны', label: 'Теплые обзвоны' },
   { value: 'Постоянный клиент', label: 'Постоянный клиент' },
   { value: 'Сарафанное радио', label: 'Сарафанное радио' },
+  { value: 'Выставка', label: 'Выставка' },
 ] as const
 
 interface ClientOption {
