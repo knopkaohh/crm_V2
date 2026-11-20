@@ -8,28 +8,29 @@ const PDFDocument = require('pdfkit');
 
 const YELLOW = '#edc147';
 const INK = '#1A1A1A';
-const MUTED = '#6E6A62';
+const MUTED = '#5C574E';
 const LINE = '#E4E0D8';
 const YELLOW_INK = '#3A3114';
 const YELLOW_LINE = '#C9A43A';
 
 const PAGE_W = 595.28;
 const PAGE_H = 841.89;
-const M = 36;
+const M = 40;
 
 const FONT_DIR = '/usr/share/fonts/truetype/macos';
 
 const order = {
-  number: '10421',
-  date: '20 ноября 2026',
-  clientName: 'Иванов Иван Иванович',
-  company: 'ООО «Ромашка»',
-  phone: '+7 495 120-44-18',
+  number: 'AF-0720',
+  date: '20.11.2026',
+  clientName: 'Полина Нетреба',
+  phone: '+7 915 234-43-31',
+  payee: 'Федотов Антон Вадимович',
+  card: '2200 7001 7744 6498',
+  transferPhone: '+7 916 354-92-87',
   items: [
-    { name: 'Zip-Lock пакет', detail: '40 × 40 см', qty: 60000, price: 13.7 },
-    { name: 'Zip-Lock пакет', detail: '30 × 40 см', qty: 25000, price: 9.9 },
-    { name: 'Картонная навесная бирка', detail: '90 × 50 мм, soft-touch', qty: 8000, price: 6.4 },
-    { name: 'Сатиновая бирка', detail: '25 × 70 мм', qty: 15000, price: 3.1 },
+    { name: 'ZIP-Lock пакет 35×45 см', qty: 300, sum: 10365 },
+    { name: 'Стикеры 20×20 мм', qty: 312, sum: 1201.2 },
+    { name: 'Картонная навесная бирка', qty: 300, sum: 9180 },
   ],
 };
 
@@ -37,7 +38,7 @@ function money(value) {
   const rounded = Math.round(value * 100) / 100;
   const [intPart, frac] = rounded.toFixed(2).split('.');
   const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  return frac === '00' ? `${grouped} ₽` : `${grouped},${frac} ₽`;
+  return `${grouped},${frac} ₽`;
 }
 
 function qty(value) {
@@ -60,176 +61,105 @@ function render() {
 
   doc.rect(0, 0, PAGE_W, PAGE_H).fill('#FFFFFF');
 
-  doc.font('medium').fontSize(8).fillColor(MUTED);
-  doc.text('СЧЁТ ДЛЯ', M, 34, { lineBreak: false });
+  doc.font('bold').fontSize(26).fillColor(INK);
+  doc.text(order.clientName, M, 40, { width: 330, lineBreak: false });
+  doc.font('regular').fontSize(15).fillColor(INK);
+  doc.text(order.phone, M, 76, { lineBreak: false });
 
-  doc.font('bold').fontSize(18).fillColor(INK);
-  doc.text(order.clientName, M, 50, { width: 320, lineBreak: false });
+  doc.font('bold').fontSize(22).fillColor(INK);
+  doc.text(order.number, 360, 40, { width: PAGE_W - M - 360, align: 'right', lineBreak: false });
+  doc.font('regular').fontSize(15).fillColor(MUTED);
+  doc.text(order.date, 360, 72, { width: PAGE_W - M - 360, align: 'right', lineBreak: false });
 
-  doc.font('regular').fontSize(9).fillColor(MUTED);
-  doc.text(order.company, M, 76, { lineBreak: false });
-
-  doc.circle(M + 4, 102, 3.2).lineWidth(0.8).strokeColor(INK).stroke();
-  doc.font('regular').fontSize(9).fillColor(INK);
-  doc.text(order.phone, M + 14, 96, { lineBreak: false });
-
-  const rightX = 390;
-  doc.font('medium').fontSize(8).fillColor(MUTED);
-  doc.text('№ СЧЁТА', rightX, 34, { width: PAGE_W - M - rightX, align: 'left', lineBreak: false });
-  doc.font('semibold').fontSize(12).fillColor(INK);
-  doc.text(order.number, rightX, 48, { width: PAGE_W - M - rightX, lineBreak: false });
-  doc.font('medium').fontSize(8).fillColor(MUTED);
-  doc.text('ДАТА', rightX, 74, { width: PAGE_W - M - rightX, lineBreak: false });
-  doc.font('semibold').fontSize(11).fillColor(INK);
-  doc.text(order.date, rightX, 88, { width: PAGE_W - M - rightX, lineBreak: false });
-
-  doc.moveTo(M, 122).lineTo(PAGE_W - M, 122).lineWidth(0.7).strokeColor(LINE).stroke();
-
-  doc.font('bold').fontSize(9).fillColor(YELLOW);
-  doc.text('+', M, 132, { lineBreak: false });
+  doc.moveTo(M, 112).lineTo(PAGE_W - M, 112).lineWidth(1).strokeColor(LINE).stroke();
 
   doc.font('bold').fontSize(48).fillColor(INK);
   const title = 'Счёт';
   const titleW = doc.widthOfString(title);
-  doc.text(title, M, 146, { lineBreak: false });
+  doc.text(title, M, 132, { lineBreak: false });
 
   const pillLabel = 'БИРКА МАРКЕТ';
-  doc.font('semibold').fontSize(8);
+  doc.font('semibold').fontSize(12);
   const pillTextW = doc.widthOfString(pillLabel);
-  const pillW = pillTextW + 36;
-  const pillH = 26;
+  const pillW = pillTextW + 28;
+  const pillH = 32;
   const pillX = M + titleW + 18;
-  const pillY = 164;
-  doc.roundedRect(pillX, pillY, pillW, pillH, 13).fill(YELLOW);
-  doc.font('semibold').fontSize(8).fillColor(INK);
-  doc.text(pillLabel, pillX + 12, pillY + 8, { width: pillTextW + 2, lineBreak: false });
-  doc.circle(pillX + pillW - 15, pillY + pillH / 2, 5).fill(INK);
-  doc.circle(pillX + pillW - 15, pillY + pillH / 2, 2).fill(YELLOW);
+  const pillY = 148;
+  doc.roundedRect(pillX, pillY, pillW, pillH, 16).fill(YELLOW);
+  doc.fillColor(INK).text(pillLabel, pillX + 14, pillY + 9, { width: pillTextW + 2, lineBreak: false });
 
-  const boxX = Math.max(372, pillX + pillW + 16);
-  doc.font('regular').fontSize(10).fillColor('#3F3F3F');
-  doc.text('Бирки, упаковка и полиграфия для вашего бренда.', M, 214, {
-    width: boxX - M - 18,
-  });
+  const colW = 250;
+  const payY = 214;
+  doc.font('semibold').fontSize(12).fillColor(MUTED);
+  doc.text('ПОЛУЧАТЕЛЬ', M, payY, { lineBreak: false });
+  doc.font('bold').fontSize(16).fillColor(INK);
+  doc.text(order.payee, M, payY + 20, { width: colW });
 
-  const boxY = 146;
-  const boxW = PAGE_W - M - boxX;
-  const boxH = 168;
-  doc.roundedRect(boxX, boxY, boxW, boxH, 2).lineWidth(0.8).strokeColor('#D9D4CB').stroke();
-  doc.font('semibold').fontSize(8).fillColor(INK);
-  doc.text('КАК С НАМИ СВЯЗАТЬСЯ', boxX + 12, boxY + 12, { width: boxW - 24 });
+  doc.font('semibold').fontSize(12).fillColor(MUTED);
+  doc.text('КАРТА, Т-БАНК', M + 280, payY, { lineBreak: false });
+  doc.font('bold').fontSize(16).fillColor(INK);
+  doc.text(order.card, M + 280, payY + 20, { width: 240, lineBreak: false });
 
-  const contacts = [
-    ['+7 495 003-88-81', 'телефон'],
-    ['prod@birka-market.ru', 'почта'],
-    ['birka-market.ru', 'сайт'],
-    ['Москва, Строительный пр., 2с1', 'офис'],
-  ];
-  contacts.forEach((row, index) => {
-    const y = boxY + 38 + index * 30;
-    doc.circle(boxX + 18, y + 5, 3).lineWidth(0.7).strokeColor(INK).stroke();
-    doc.font('medium').fontSize(8.5).fillColor(INK);
-    doc.text(row[0], boxX + 28, y, { width: boxW - 40 });
-  });
+  doc.font('semibold').fontSize(12).fillColor(MUTED);
+  doc.text('ТЕЛЕФОН ДЛЯ ПЕРЕВОДА', M, payY + 78, { lineBreak: false });
+  doc.font('bold').fontSize(18).fillColor(INK);
+  doc.text(order.transferPhone, M, payY + 98, { lineBreak: false });
 
-  doc.font('semibold').fontSize(8).fillColor(MUTED);
-  doc.text('УСЛОВИЯ', M, 268, { lineBreak: false });
-
-  const terms = [
-    'Оплата без НДС: перевод на карту или по выставленному счёту.',
-    'Получатель: Федотов Антон Вадимович',
-    'Банк: АО «Тинькофф Банк», БИК 044525974, КПП 771301001',
-    'Карта: 2200 7001 7744 6498',
-    'Телефон для перевода: +7 916 354-92-87',
-  ];
-  let termY = 286;
-  terms.forEach((line) => {
-    doc.font('regular').fontSize(8.5).fillColor('#3A3A3A');
-    doc.text(line, M, termY, { width: 290 });
-    termY = doc.y + 5;
-  });
-
-  const bandTop = 430;
+  const bandTop = 390;
   doc.rect(0, bandTop, PAGE_W, PAGE_H - bandTop).fill(YELLOW);
 
   const cols = [
-    { label: 'НАИМЕНОВАНИЕ', x: M, w: 250, align: 'left' },
-    { label: 'ЦЕНА', x: 300, w: 80, align: 'right' },
-    { label: 'КОЛ-ВО', x: 386, w: 70, align: 'right' },
-    { label: 'СУММА', x: 462, w: PAGE_W - M - 462, align: 'right' },
+    { label: 'ОПИСАНИЕ', x: M, w: 280, align: 'left' },
+    { label: 'КОЛИЧЕСТВО', x: 330, w: 90, align: 'right' },
+    { label: 'СТОИМОСТЬ', x: 430, w: PAGE_W - M - 430, align: 'right' },
   ];
 
-  doc.font('semibold').fontSize(8).fillColor(YELLOW_INK);
+  doc.font('semibold').fontSize(12).fillColor(YELLOW_INK);
   cols.forEach((col) => {
-    doc.text(col.label, col.x, bandTop + 22, {
+    doc.text(col.label, col.x, bandTop + 28, {
       width: col.w,
       align: col.align,
       lineBreak: false,
     });
   });
+  doc.moveTo(M, bandTop + 52).lineTo(PAGE_W - M, bandTop + 52).lineWidth(1).strokeColor(YELLOW_LINE).stroke();
 
-  doc.moveTo(M, bandTop + 42).lineTo(PAGE_W - M, bandTop + 42).lineWidth(0.6).strokeColor(YELLOW_LINE).stroke();
-
-  let rowY = bandTop + 54;
+  let rowY = bandTop + 72;
   order.items.forEach((item) => {
-    doc.font('semibold').fontSize(11).fillColor(INK);
-    doc.text(item.name, M, rowY, { width: 250, lineBreak: false });
-    doc.font('regular').fontSize(8).fillColor(YELLOW_INK);
-    doc.text(item.detail, M, rowY + 16, { width: 250, lineBreak: false });
-    doc.font('medium').fontSize(10).fillColor(INK);
-    doc.text(money(item.price), 300, rowY + 4, { width: 80, align: 'right', lineBreak: false });
-    doc.text(qty(item.qty), 386, rowY + 4, { width: 70, align: 'right', lineBreak: false });
-    doc.text(money(item.qty * item.price), 462, rowY + 4, {
-      width: PAGE_W - M - 462,
+    doc.font('semibold').fontSize(16).fillColor(INK);
+    doc.text(item.name, M, rowY, { width: 290, lineBreak: false });
+    doc.font('medium').fontSize(16).fillColor(INK);
+    doc.text(qty(item.qty), 330, rowY, { width: 90, align: 'right', lineBreak: false });
+    doc.text(money(item.sum), 430, rowY, {
+      width: PAGE_W - M - 430,
       align: 'right',
       lineBreak: false,
     });
-    rowY += 48;
-    doc.moveTo(M, rowY - 10).lineTo(PAGE_W - M, rowY - 10).lineWidth(0.5).strokeColor(YELLOW_LINE).stroke();
+    rowY += 58;
+    doc.moveTo(M, rowY - 16).lineTo(PAGE_W - M, rowY - 16).lineWidth(0.8).strokeColor(YELLOW_LINE).stroke();
   });
 
-  const total = order.items.reduce((sum, item) => sum + item.qty * item.price, 0);
+  const total = order.items.reduce((sum, item) => sum + item.sum, 0);
   const totalQty = order.items.reduce((sum, item) => sum + item.qty, 0);
-
-  const drawPill = (label, value, x, y, filled) => {
-    doc.font('semibold').fontSize(8);
-    const labelW = doc.widthOfString(label);
-    doc.font('bold').fontSize(9);
-    const valueW = doc.widthOfString(value);
-    const w = labelW + valueW + 28;
-    const h = 24;
-    if (filled) {
-      doc.roundedRect(x, y, w, h, 12).fill('#FFFFFF');
-      doc.fillColor(INK);
-    } else {
-      doc.roundedRect(x, y, w, h, 12).lineWidth(1).strokeColor(INK).stroke();
-      doc.fillColor(INK);
-    }
-    doc.font('semibold').fontSize(8);
-    doc.text(label, x + 12, y + 7, { lineBreak: false });
-    doc.font('bold').fontSize(9);
-    doc.text(value, x + 16 + labelW, y + 6.5, { lineBreak: false });
-    return w;
-  };
-
   const totalLabel = money(total);
-  doc.font('bold').fontSize(9);
-  const totalValueW = doc.widthOfString(totalLabel);
-  doc.font('semibold').fontSize(8);
-  const totalPillW = doc.widthOfString('ИТОГО') + totalValueW + 28;
-  const pillsY = PAGE_H - 52;
-  const totalX = PAGE_W - M - totalPillW;
-  drawPill('ИТОГО', totalLabel, totalX, pillsY, true);
 
-  const subLabel = money(total);
-  doc.font('bold').fontSize(9);
-  const subValueW = doc.widthOfString(subLabel);
-  doc.font('semibold').fontSize(8);
-  const subPillW = doc.widthOfString('ПОДЫТОГ') + subValueW + 28;
-  drawPill('ПОДЫТОГ', subLabel, totalX - subPillW - 8, pillsY, false);
+  doc.font('bold').fontSize(16);
+  const valueW = doc.widthOfString(totalLabel);
+  doc.font('semibold').fontSize(13);
+  const captionW = doc.widthOfString('ИТОГО');
+  const totalPillW = captionW + valueW + 36;
+  const totalPillH = 36;
+  const pillTop = PAGE_H - 64;
+  const pillLeft = PAGE_W - M - totalPillW;
+  doc.roundedRect(pillLeft, pillTop, totalPillW, totalPillH, 18).fill('#FFFFFF');
+  doc.fillColor(INK);
+  doc.font('semibold').fontSize(13);
+  doc.text('ИТОГО', pillLeft + 16, pillTop + 10, { lineBreak: false });
+  doc.font('bold').fontSize(16);
+  doc.text(totalLabel, pillLeft + 22 + captionW, pillTop + 9, { lineBreak: false });
 
-  doc.font('medium').fontSize(8).fillColor(YELLOW_INK);
-  doc.text(`${qty(totalQty)} шт.`, M, pillsY + 6, { lineBreak: false });
+  doc.font('semibold').fontSize(16).fillColor(INK);
+  doc.text(`${qty(totalQty)} ед.`, M, pillTop + 8, { lineBreak: false });
 
   doc.end();
 
