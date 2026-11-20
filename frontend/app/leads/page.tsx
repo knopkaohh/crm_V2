@@ -338,6 +338,7 @@ export default function LeadsPage() {
   const [funnelLoading, setFunnelLoading] = useState(false)
   const [proposalLead, setProposalLead] = useState<FunnelLead | null>(null)
   const [proposalOpen, setProposalOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1483,6 +1484,19 @@ export default function LeadsPage() {
               <Plus className="h-5 w-5" />
               <span>{showNewLeadForm ? 'Скрыть форму' : 'Новый контакт'}</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setSearchOpen((prev) => !prev)}
+              className={`relative inline-flex h-10 w-10 items-center justify-center rounded-xl border shadow-sm transition ${
+                searchOpen || contactsSearchInput.trim() || sourceFilter !== 'all' || managerFilter !== 'all'
+                  ? 'border-primary-200 bg-primary-50 text-primary-600'
+                  : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+              aria-label="Поиск"
+              title="Поиск"
+            >
+              <Search className="h-5 w-5" />
+            </button>
           </div>
         </div>
 
@@ -1507,6 +1521,7 @@ export default function LeadsPage() {
           </button>
         </div>
 
+        {searchOpen ? (
         <div className="rounded-2xl border border-primary-100 bg-gradient-to-r from-primary-50/70 via-white to-primary-50/30 p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-2">
             <p className="text-sm font-semibold text-gray-900">Фильтры контактов</p>
@@ -1574,6 +1589,7 @@ export default function LeadsPage() {
           </div>
           </div>
         </div>
+        ) : null}
 
         {showNewLeadForm ? (
           <div className="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-xl shadow-primary-900/5 ring-1 ring-black/5">
@@ -2034,6 +2050,7 @@ export default function LeadsPage() {
       <ProposalModal
         open={proposalOpen}
         lead={proposalLead}
+        leads={funnelLeads}
         onClose={() => {
           setProposalOpen(false)
           setProposalLead(null)

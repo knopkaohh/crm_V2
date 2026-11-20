@@ -79,13 +79,22 @@ const formatMoney = (value: number) =>
 interface ProposalModalProps {
   open: boolean
   lead: FunnelLead | null
+  leads: FunnelLead[]
   onClose: () => void
   onCompleted: (leadId: string, movedToWaiting: boolean) => void
+}
+
+function findLeadByName(name: string, leads: FunnelLead[]): FunnelLead | null {
+  const needle = name.trim().toLowerCase()
+  if (!needle) return null
+  const matches = leads.filter((item) => item.client.name.trim().toLowerCase() === needle)
+  return matches.length === 1 ? matches[0] : null
 }
 
 export default function ProposalModal({
   open,
   lead,
+  leads,
   onClose,
   onCompleted,
 }: ProposalModalProps) {
@@ -96,7 +105,13 @@ export default function ProposalModal({
   const [loadingSaved, setLoadingSaved] = useState(false)
 
   useEffect(() => {
-    if (!open || !lead) return
+    if (!open) return
+    if (!lead) {
+      setMoveToWaiting(false)
+      setForm(blankForm(null))
+      setLoadingSaved(false)
+      return
+    }
     let cancelled = false
     setMoveToWaiting(false)
     setForm(blankForm(lead))
@@ -140,7 +155,7 @@ export default function ProposalModal({
     }
   }, [open, lead])
 
-  if (!open || !lead) return null
+  if (!open) return null
 
   const total = form.items.reduce((sum, item) => {
     const quantity = Number(item.quantity)
@@ -184,10 +199,15 @@ export default function ProposalModal({
   }
 
   const handleSubmit = async () => {
+    const target = lead ?? findLeadByName(form.clientName, leads)
+    if (!target) {
+      alert('Контакт с таким ФИО не найден. Проверьте имя или откройте КП с карточки клиента.')
+      return
+    }
     setSaving(true)
     try {
       const response = await api.post(
-        `/leads/${lead.id}/proposal`,
+        `/leads/${target.id}/proposal`,
         {
           ...form,
           moveToWaiting,
@@ -200,9 +220,9 @@ export default function ProposalModal({
         },
         { responseType: 'blob' },
       )
-      const fileName = `КП ${form.productLine || 'Бирка Маркет'} — ${lead.client.name}.pdf`
+      const fileName = `КП ${form.productLine || 'Бирка Маркет'} — ${target.client.name}.pdf`
       await showInvoicePdfFromBlob(response.data, fileName, null)
-      onCompleted(lead.id, moveToWaiting)
+      onCompleted(target.id, moveToWaiting)
     } catch (error: any) {
       console.error('Failed to create proposal:', error)
       let message = 'Не удалось сформировать КП'
@@ -229,7 +249,10 @@ export default function ProposalModal({
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
           <div>
             <h3 className="text-lg font-semibold text-gray-900">Сформировать КП</h3>
-            <p className="text-xs text-gray-500">Для {lead.client.name}. PDF собирается по бланку «Бирка Маркет».</p>
+            <p className="text-xs text-gray-500">
+              {lead ? `Для ${lead.client.name}. ` : ''}
+              PDF собирается по бланку «Бирка Маркет».
+            </p>
           </div>
           <button
             type="button"
