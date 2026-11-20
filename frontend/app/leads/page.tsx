@@ -769,8 +769,21 @@ export default function LeadsPage() {
         nextContactDate: new Date(nextContactForm.nextContactDate).toISOString(),
         description,
       })
+      const nextDate = new Date(nextContactForm.nextContactDate).toISOString()
+      const applyNextDate = (list: Lead[]) =>
+        list.map((lead) =>
+          lead.id === selectedLead.id
+            ? { ...lead, nextContactDate: nextDate, description }
+            : lead,
+        )
+      setTodayLeads(applyNextDate)
+      setFutureLeads(applyNextDate)
+      setFunnelLeads(applyNextDate)
       resetModalState()
       await loadLeads({ showSpinner: false })
+      if (contactsView === 'funnel') {
+        await loadFunnelLeads()
+      }
     } catch (error) {
       console.error('Failed to save next contact:', error)
       alert('Не удалось сохранить следующий контакт')
@@ -1997,9 +2010,16 @@ export default function LeadsPage() {
               const full = funnelLeads.find((item) => item.id === lead.id)
               if (full) void openLeadModal(full, 'order')
             }}
+            onNextContact={(lead) => {
+              const full = funnelLeads.find((item) => item.id === lead.id)
+              if (full) void openLeadModal(full, 'nextContact')
+            }}
             onCloseLead={(lead) => {
               const full = funnelLeads.find((item) => item.id === lead.id)
               if (full) void openLeadModal(full, 'close')
+            }}
+            onOpenLead={(lead) => {
+              router.push(`/leads/${lead.id}`)
             }}
             onDeleteLead={(lead) => {
               const full = funnelLeads.find((item) => item.id === lead.id)

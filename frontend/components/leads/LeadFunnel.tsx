@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { FileText, Phone, ShoppingCart, UserX, X } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { CalendarClock, FileText, Phone, ShoppingCart, UserX, X } from 'lucide-react'
 
 export const FUNNEL_STAGES = [
   { id: 'NEW_LEAD', label: 'Новый лид', dot: 'bg-emerald-500' },
@@ -36,8 +36,10 @@ interface LeadFunnelProps {
   onStageChange: (leadId: string, stage: FunnelStageId) => void
   onCreateProposal: (lead: FunnelLead | null) => void
   onCreateOrder: (lead: FunnelLead) => void
+  onNextContact: (lead: FunnelLead) => void
   onCloseLead: (lead: FunnelLead) => void
   onDeleteLead: (lead: FunnelLead) => void
+  onOpenLead: (lead: FunnelLead) => void
 }
 
 const formatWhen = (dateString: string | null) => {
@@ -58,11 +60,14 @@ export default function LeadFunnel({
   onStageChange,
   onCreateProposal,
   onCreateOrder,
+  onNextContact,
   onCloseLead,
   onDeleteLead,
+  onOpenLead,
 }: LeadFunnelProps) {
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOverStage, setDragOverStage] = useState<string | null>(null)
+  const suppressClickRef = useRef(false)
 
   const stageOf = (lead: FunnelLead): FunnelStageId => {
     const found = FUNNEL_STAGES.find((stage) => stage.id === lead.funnelStage)
@@ -75,7 +80,7 @@ export default function LeadFunnel({
         <div className="px-4 text-center sm:px-48">
           <h2 className="text-xl font-semibold text-gray-900">Воронка</h2>
           <p className="text-sm text-gray-500">
-            Перетащите карточку в другой этап.
+            Нажмите карточку, чтобы открыть лид. Перетащите её, чтобы сменить этап.
           </p>
         </div>
         <button
@@ -139,12 +144,31 @@ export default function LeadFunnel({
                         <article
                           key={lead.id}
                           draggable
-                          onDragStart={() => setDragId(lead.id)}
+                          role="link"
+                          tabIndex={0}
+                          onDragStart={() => {
+                            suppressClickRef.current = true
+                            setDragId(lead.id)
+                          }}
                           onDragEnd={() => {
                             setDragId(null)
                             setDragOverStage(null)
+                            window.setTimeout(() => {
+                              suppressClickRef.current = false
+                            }, 0)
                           }}
-                          className="cursor-grab rounded-xl border border-gray-200 bg-white p-3 shadow-sm active:cursor-grabbing"
+                          onClick={(event) => {
+                            if (suppressClickRef.current) return
+                            if ((event.target as HTMLElement).closest('button')) return
+                            onOpenLead(lead)
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.target !== event.currentTarget) return
+                            if (event.key !== 'Enter' && event.key !== ' ') return
+                            event.preventDefault()
+                            onOpenLead(lead)
+                          }}
+                          className="cursor-pointer rounded-xl border border-gray-200 bg-white p-3 shadow-sm transition hover:border-primary-200 active:cursor-grabbing"
                         >
                           <div className="flex items-start gap-2">
                             <div className="min-w-0 flex-1">
@@ -157,7 +181,10 @@ export default function LeadFunnel({
                               type="button"
                               draggable={false}
                               onMouseDown={(event) => event.stopPropagation()}
-                              onClick={() => onDeleteLead(lead)}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                onDeleteLead(lead)
+                              }}
                               className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-gray-400 transition hover:bg-red-50 hover:text-red-600"
                               aria-label="Удалить"
                               title="Удалить"
@@ -195,7 +222,10 @@ export default function LeadFunnel({
                               type="button"
                               draggable={false}
                               onMouseDown={(event) => event.stopPropagation()}
-                              onClick={() => onCreateOrder(lead)}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                onCreateOrder(lead)
+                              }}
                               className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
                             >
                               <ShoppingCart className="h-3.5 w-3.5" />
@@ -205,7 +235,23 @@ export default function LeadFunnel({
                               type="button"
                               draggable={false}
                               onMouseDown={(event) => event.stopPropagation()}
-                              onClick={() => onCloseLead(lead)}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                onNextContact(lead)
+                              }}
+                              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-100"
+                            >
+                              <CalendarClock className="h-3.5 w-3.5" />
+                              Следующий контакт
+                            </button>
+                            <button
+                              type="button"
+                              draggable={false}
+                              onMouseDown={(event) => event.stopPropagation()}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                onCloseLead(lead)
+                              }}
                               className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-semibold text-gray-600 transition hover:bg-gray-100"
                             >
                               <UserX className="h-3.5 w-3.5" />
