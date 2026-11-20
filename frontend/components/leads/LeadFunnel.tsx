@@ -147,7 +147,12 @@ export default function LeadFunnel({
                           className="cursor-grab rounded-xl border border-gray-200 bg-white p-3 shadow-sm active:cursor-grabbing"
                         >
                           <div className="flex items-start gap-2">
-                            <h4 className="min-w-0 flex-1 text-sm font-semibold text-gray-900">{lead.client.name}</h4>
+                            <div className="min-w-0 flex-1">
+                              <h4 className="truncate text-sm font-semibold text-gray-900">{lead.client.name}</h4>
+                              {lead.client.company?.trim() ? (
+                                <p className="truncate text-xs font-medium text-gray-600">{lead.client.company}</p>
+                              ) : null}
+                            </div>
                             <button
                               type="button"
                               draggable={false}
