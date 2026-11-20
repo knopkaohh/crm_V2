@@ -420,6 +420,11 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
             density: true,
             bagColor: true,
             sliderColor: true,
+            foiling: true,
+            handles: true,
+            productBase: true,
+            stickerShape: true,
+            lamination: true,
             desiredDeadline: true,
             productionComments: true,
             productionStartDate: true,
@@ -1193,7 +1198,8 @@ router.put('/:orderId/items/:itemId', authenticate, async (req: AuthRequest, res
         else if (typeof value === 'string' && value === '' && 
             ['material', 'baseColor', 'printColor', 'cutting', 'centerFold', 'freeEdge', 
              'postProcessing', 'coating', 'density', 'bagColor', 'sliderColor', 
-             'baseColorCustom', 'printColorCustom', 'productionComments'].includes(key)) {
+             'baseColorCustom', 'printColorCustom', 'productionComments',
+             'foiling', 'handles', 'productBase', 'stickerShape', 'lamination'].includes(key)) {
           cleanedData[key] = null;
         } else {
           cleanedData[key] = value;
