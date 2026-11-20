@@ -236,7 +236,14 @@ export default function ProductionCalendarPage() {
       'Хлопок': 'bg-green-500',
       'Жаккард': 'bg-yellow-500',
       'Картон': 'bg-orange-500',
-      'ZIP-Lock пакет': 'bg-teal-500'
+      'Картонная навесная бирка': 'bg-orange-500',
+      'ZIP-Lock пакет': 'bg-teal-500',
+      'ПВД Пакеты': 'bg-sky-600',
+      'Бумажные пакеты': 'bg-amber-700',
+      'Листовки': 'bg-rose-500',
+      'Буклеты': 'bg-fuchsia-600',
+      'Пуллеры': 'bg-lime-600',
+      'Стикеры': 'bg-cyan-600'
     }
     
     return colors[material] || 'bg-gray-400'
@@ -333,7 +340,13 @@ export default function ProductionCalendarPage() {
               { name: 'Хлопок', color: 'bg-green-500' },
               { name: 'Жаккард', color: 'bg-yellow-500' },
               { name: 'Картон', color: 'bg-orange-500' },
-              { name: 'ZIP-Lock', color: 'bg-teal-500' }
+              { name: 'ZIP-Lock', color: 'bg-teal-500' },
+              { name: 'ПВД пакеты', color: 'bg-sky-600' },
+              { name: 'Бумажные пакеты', color: 'bg-amber-700' },
+              { name: 'Листовки', color: 'bg-rose-500' },
+              { name: 'Буклеты', color: 'bg-fuchsia-600' },
+              { name: 'Пуллеры', color: 'bg-lime-600' },
+              { name: 'Стикеры', color: 'bg-cyan-600' }
             ].map(({ name, color }) => (
               <div key={name} className="flex items-center gap-2">
                 <div className={`w-4 h-4 rounded ${color}`} />

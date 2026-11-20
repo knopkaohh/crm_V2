@@ -27,6 +27,15 @@ enum LeadStatus {
   NOT_OUR_CLIENT     // Не наш клиент
 }
 
+// Колонки вкладки «Воронка» на странице контактов
+enum LeadFunnelStage {
+  NEW_LEAD         // Новый лид
+  NO_CONTACT       // Не удалось связаться
+  IN_DIALOGUE      // В диалоге
+  PREPARING_KP     // Готовим КП
+  WAITING_CLIENT   // Ждём клиента
+}
+
 enum OrderStatus {
   NEW_ORDER           // Новый заказ
   DESIGN_APPROVAL     // Утверждение дизайна
@@ -218,6 +227,7 @@ model Lead {
   id              String     @id @default(uuid())
   clientId        String
   status          LeadStatus @default(NEW_LEAD)
+  funnelStage     LeadFunnelStage @default(NEW_LEAD)
   managerId       String     // Менеджер, отвечающий за лид
   creatorId       String
   value           Decimal?   // Потенциальная стоимость
@@ -238,8 +248,10 @@ model Lead {
   chat          Chat?
   tasks         Task[]
   closedContacts ClosedContact[]
+  proposals     CommercialProposal[]
 
   @@index([status])
+  @@index([funnelStage])
   @@index([managerId])
   @@index([clientId])
   @@index([nextContactDate])
@@ -248,6 +260,45 @@ model Lead {
   @@index([nextContactDate, managerId])
   @@index([clientId, createdAt])
   @@map("leads")
+}
+
+// Коммерческое предложение, сформированное из карточки контакта
+model CommercialProposal {
+  id             String   @id @default(uuid())
+  leadId         String
+  clientName     String
+  companyName    String
+  productLine    String
+  subtitle       String
+  intro          String
+  termsPrice     String
+  termsPayment   String
+  termsDelivery  String
+  closingTitle   String
+  closingText    String
+  createdById    String
+  createdAt      DateTime @default(now())
+
+  lead  Lead                       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  items CommercialProposalItem[]
+
+  @@index([leadId, createdAt])
+  @@map("commercial_proposals")
+}
+
+model CommercialProposalItem {
+  id         String  @id @default(uuid())
+  proposalId String
+  position   Int
+  name       String
+  detail     String  @default("")
+  quantity   Int
+  unitPrice  Decimal @db.Decimal(12, 2)
+
+  proposal CommercialProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId])
+  @@map("commercial_proposal_items")
 }
 
 model ClosedContact {
@@ -355,6 +406,13 @@ model OrderItem {
   density        String? // Плотность: 120мкм, 140мкм
   bagColor       String? // Цвет пакета: Белый, Черный
   sliderColor    String? // Цвет бегунка: Белый, Черный
+
+  // Бумажные пакеты, пуллеры и стикеры
+  foiling        String? // Фольгирование: Да/Нет
+  handles        String? // Ручки: Репс/Шнур
+  productBase    String? // Основа: пуллер или материал стикера
+  stickerShape   String? // Форма стикера
+  lamination     String? // Ламинация стикера
   
   desiredDeadline DateTime? // Желаемый срок
   productionComments String? // Комментарии

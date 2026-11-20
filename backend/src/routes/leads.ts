@@ -7,6 +7,7 @@ import {
 } from '../utils/lead-call-notifications';
 import { prisma } from '../utils/prisma';
 import { generateOrderNumber } from '../utils/order-utils';
+import { generateProposalPdf, ProposalPdfItem } from '../utils/generate-proposal';
 import { canViewAllLeads, canDeleteLead, canAccessLeadByManager } from '../utils/leads-access';
 import {
   andWhere,
@@ -18,6 +19,98 @@ import {
 } from '../utils/isolated-access';
 
 const router = express.Router();
+
+const LEAD_FUNNEL_STAGES = [
+  'NEW_LEAD',
+  'NO_CONTACT',
+  'IN_DIALOGUE',
+  'PREPARING_KP',
+  'WAITING_CLIENT',
+] as const;
+
+function clipText(value: unknown, max: number): string {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function parseProposalPayload(body: any): {
+  error?: string;
+  clientName: string;
+  companyName: string;
+  productLine: string;
+  subtitle: string;
+  intro: string;
+  termsPrice: string;
+  termsPayment: string;
+  termsDelivery: string;
+  closingTitle: string;
+  closingText: string;
+  moveToWaiting: boolean;
+  items: ProposalPdfItem[];
+} {
+  const clientName = clipText(body?.clientName, 160);
+  const companyName = clipText(body?.companyName, 160);
+  const productLine = clipText(body?.productLine, 80);
+  const subtitle = clipText(body?.subtitle, 240);
+  const intro = String(body?.intro ?? '').trim().slice(0, 1200);
+  const termsPrice = clipText(body?.termsPrice, 400);
+  const termsPayment = clipText(body?.termsPayment, 400);
+  const termsDelivery = clipText(body?.termsDelivery, 400);
+  const closingTitle = clipText(body?.closingTitle, 160) || 'Будем рады сотрудничеству!';
+  const closingText = clipText(body?.closingText, 400) || 'Готовы уточнить детали заказа и согласовать удобные условия поставки.';
+  const moveToWaiting = Boolean(body?.moveToWaiting);
+  const base = {
+    clientName,
+    companyName,
+    productLine,
+    subtitle,
+    intro,
+    termsPrice,
+    termsPayment,
+    termsDelivery,
+    closingTitle,
+    closingText,
+    moveToWaiting,
+    items: [] as ProposalPdfItem[],
+  };
+
+  if (!clientName) {
+    return { ...base, error: 'Укажите ФИО клиента' };
+  }
+  if (!companyName) {
+    return { ...base, error: 'Укажите название компании' };
+  }
+  if (!productLine) {
+    return { ...base, error: 'Укажите линейку, например «Упаковка Zip-Lock»' };
+  }
+  if (!subtitle || !intro) {
+    return { ...base, error: 'Заполните подзаголовок и абзац' };
+  }
+  if (!termsPrice || !termsPayment || !termsDelivery) {
+    return { ...base, error: 'Заполните условия заказа' };
+  }
+
+  const rawItems = Array.isArray(body?.items) ? body.items : [];
+  if (rawItems.length === 0 || rawItems.length > 20) {
+    return { ...base, error: 'Добавьте от 1 до 20 позиций' };
+  }
+
+  const items: ProposalPdfItem[] = [];
+  for (const raw of rawItems) {
+    const name = clipText(raw?.name, 160);
+    const detail = clipText(raw?.detail, 120);
+    const quantity = Number(raw?.quantity);
+    const unitPrice = Number(String(raw?.unitPrice ?? '').replace(/\s/g, '').replace(',', '.'));
+    if (!name || !Number.isFinite(quantity) || quantity < 1 || quantity > 100_000_000 || !Number.isInteger(quantity)) {
+      return { ...base, error: 'Проверьте наименование и количество в спецификации' };
+    }
+    if (!Number.isFinite(unitPrice) || unitPrice < 0 || unitPrice > 100_000_000) {
+      return { ...base, error: 'Проверьте цену за единицу' };
+    }
+    items.push({ name, detail, quantity, unitPrice: Math.round(unitPrice * 100) / 100 });
+  }
+
+  return { ...base, items };
+}
 
 // Получить все лиды
 router.get('/', authenticate, async (req, res) => {
@@ -103,6 +196,7 @@ router.get('/', authenticate, async (req, res) => {
               id: true,
               name: true,
               phone: true,
+              company: true,
             },
           },
           manager: {
@@ -347,7 +441,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 router.put('/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    const { status, managerId, value, description, source, deadline, nextContactDate, clientPhone, clientName } = req.body;
+    const { status, managerId, value, description, source, deadline, nextContactDate, clientPhone, clientName, funnelStage } = req.body;
 
     const existingLead = await prisma.lead.findUnique({
       where: { id },
@@ -366,6 +460,12 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
 
     const updateData: any = {};
     if (status !== undefined) updateData.status = status;
+    if (funnelStage !== undefined) {
+      if (!LEAD_FUNNEL_STAGES.includes(funnelStage)) {
+        return res.status(400).json({ error: 'Неизвестный этап воронки' });
+      }
+      updateData.funnelStage = funnelStage;
+    }
     if (managerId !== undefined && !isIsolatedRole(req.userRole)) updateData.managerId = managerId;
     if (value !== undefined) updateData.value = value ? parseFloat(value) : null;
     if (description !== undefined) updateData.description = description;
@@ -597,6 +697,161 @@ router.post('/:id/comments', authenticate, async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Create comment error:', error);
     res.status(500).json({ error: 'Ошибка при создании комментария' });
+  }
+});
+
+router.get('/:id/proposal', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const lead = await prisma.lead.findUnique({
+      where: { id },
+      select: { id: true, managerId: true },
+    });
+    if (!lead) {
+      return res.status(404).json({ error: 'Лид не найден' });
+    }
+    if (!canAccessLeadByManager(req, lead.managerId)) {
+      return res.status(403).json({ error: 'Недостаточно прав доступа' });
+    }
+    if (await rejectIfLeadHidden(req, res, lead)) return;
+
+    const proposal = await prisma.commercialProposal.findFirst({
+      where: { leadId: id },
+      orderBy: { createdAt: 'desc' },
+      include: { items: { orderBy: { position: 'asc' } } },
+    });
+
+    if (!proposal) {
+      return res.json({ proposal: null });
+    }
+
+    res.json({
+      proposal: {
+        clientName: proposal.clientName,
+        companyName: proposal.companyName,
+        productLine: proposal.productLine,
+        subtitle: proposal.subtitle,
+        intro: proposal.intro,
+        termsPrice: proposal.termsPrice,
+        termsPayment: proposal.termsPayment,
+        termsDelivery: proposal.termsDelivery,
+        closingTitle: proposal.closingTitle,
+        closingText: proposal.closingText,
+        items: proposal.items.map((item) => ({
+          name: item.name,
+          detail: item.detail,
+          quantity: item.quantity,
+          unitPrice: Number(item.unitPrice),
+        })),
+      },
+    });
+  } catch (error) {
+    console.error('Get proposal error:', error);
+    res.status(500).json({ error: 'Ошибка при загрузке коммерческого предложения' });
+  }
+});
+
+router.post('/proposal-file', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const parsed = parseProposalPayload(req.body);
+    if (parsed.error) {
+      return res.status(400).json({ error: parsed.error });
+    }
+
+    const leadId = typeof req.body?.leadId === 'string' ? req.body.leadId : '';
+    if (leadId && parsed.moveToWaiting) {
+      const lead = await prisma.lead.findUnique({
+        where: { id: leadId },
+        select: { id: true, managerId: true },
+      });
+      if (lead && canAccessLeadByManager(req, lead.managerId)) {
+        await prisma.lead.update({
+          where: { id: leadId },
+          data: { funnelStage: 'WAITING_CLIENT' },
+        });
+      }
+    }
+
+    const pdf = await generateProposalPdf(parsed);
+    const fileName = `КП ${parsed.productLine}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="proposal.pdf"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    );
+    res.send(pdf);
+  } catch (error) {
+    console.error('Create standalone proposal error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Ошибка при формировании коммерческого предложения' });
+    }
+  }
+});
+
+router.post('/:id/proposal', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const parsed = parseProposalPayload(req.body);
+    if (parsed.error) {
+      return res.status(400).json({ error: parsed.error });
+    }
+
+    const lead = await prisma.lead.findUnique({
+      where: { id },
+      select: { id: true, managerId: true },
+    });
+    if (!lead) {
+      return res.status(404).json({ error: 'Лид не найден' });
+    }
+    if (!canAccessLeadByManager(req, lead.managerId)) {
+      return res.status(403).json({ error: 'Недостаточно прав доступа' });
+    }
+    if (await rejectIfLeadHidden(req, res, lead)) return;
+
+    await prisma.commercialProposal.create({
+      data: {
+        leadId: id,
+        clientName: parsed.clientName,
+        companyName: parsed.companyName,
+        productLine: parsed.productLine,
+        subtitle: parsed.subtitle,
+        intro: parsed.intro,
+        termsPrice: parsed.termsPrice,
+        termsPayment: parsed.termsPayment,
+        termsDelivery: parsed.termsDelivery,
+        closingTitle: parsed.closingTitle,
+        closingText: parsed.closingText,
+        createdById: req.userId!,
+        items: {
+          create: parsed.items.map((item, index) => ({
+            position: index + 1,
+            name: item.name,
+            detail: item.detail,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice.toFixed(2),
+          })),
+        },
+      },
+    });
+
+    if (parsed.moveToWaiting) {
+      await prisma.lead.update({
+        where: { id },
+        data: { funnelStage: 'WAITING_CLIENT' },
+      });
+    }
+
+    const pdf = await generateProposalPdf(parsed);
+    const fileName = `КП ${parsed.productLine}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="proposal.pdf"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    );
+    res.send(pdf);
+  } catch (error) {
+    console.error('Create proposal error:', error);
+    res.status(500).json({ error: 'Ошибка при формировании коммерческого предложения' });
   }
 });
 

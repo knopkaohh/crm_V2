@@ -48,6 +48,11 @@ interface OrderItem {
   density?: string | null
   bagColor?: string | null
   sliderColor?: string | null
+  foiling?: string | null
+  handles?: string | null
+  productBase?: string | null
+  stickerShape?: string | null
+  lamination?: string | null
   desiredDeadline?: string | null
   productionComments?: string | null
   productionStartDate?: string | null
@@ -932,7 +937,8 @@ export default function OrderDetailPage() {
                       {/* Параметры производства */}
                       {(it.material || it.designCount || it.baseColor || it.printColor || it.cutting || 
                         it.postProcessing || it.coating || it.singleSidedPrint !== undefined || 
-                        it.doubleSidedPrint !== undefined || it.density || it.desiredDeadline || 
+                        it.doubleSidedPrint !== undefined || it.density || it.foiling || it.handles ||
+                        it.productBase || it.stickerShape || it.lamination || it.desiredDeadline || 
                         it.productionComments || it.productionStartDate || it.productionEndDate) && (
                         <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
                           <p className="text-xs font-semibold text-gray-700 uppercase mb-2">Параметры производства</p>
@@ -958,7 +964,7 @@ export default function OrderDetailPage() {
                                 <div className="flex items-start gap-2 text-sm">
                                   <span className="text-gray-500 min-w-[120px]">Цвет основы:</span>
                                   <span className="text-gray-900 font-medium">
-                                    {it.baseColor === 'Цветной' && it.baseColorCustom 
+                                    {(it.baseColor === 'Цветной' || it.baseColor === 'Другой') && it.baseColorCustom 
                                       ? it.baseColorCustom 
                                       : it.baseColor}
                                   </span>
@@ -969,7 +975,7 @@ export default function OrderDetailPage() {
                                 <div className="flex items-start gap-2 text-sm">
                                   <span className="text-gray-500 min-w-[120px]">Цвет печати:</span>
                                   <span className="text-gray-900 font-medium">
-                                    {it.printColor === 'Цветной' && it.printColorCustom 
+                                    {(it.printColor === 'Цветной' || it.printColor === 'Другой') && it.printColorCustom 
                                       ? it.printColorCustom 
                                       : it.printColor}
                                   </span>
@@ -1051,6 +1057,41 @@ export default function OrderDetailPage() {
                                 <div className="flex items-start gap-2 text-sm">
                                   <span className="text-gray-500 min-w-[120px]">Цвет бегунка:</span>
                                   <span className="text-gray-900 font-medium">{it.sliderColor}</span>
+                                </div>
+                              )}
+                            </>
+                          )}
+
+                          {(it.foiling || it.handles || it.productBase || it.stickerShape || it.lamination) && (
+                            <>
+                              {it.foiling && (
+                                <div className="flex items-start gap-2 text-sm">
+                                  <span className="text-gray-500 min-w-[120px]">Фольгирование:</span>
+                                  <span className="text-gray-900 font-medium">{it.foiling}</span>
+                                </div>
+                              )}
+                              {it.handles && (
+                                <div className="flex items-start gap-2 text-sm">
+                                  <span className="text-gray-500 min-w-[120px]">Ручки:</span>
+                                  <span className="text-gray-900 font-medium">{it.handles}</span>
+                                </div>
+                              )}
+                              {it.productBase && (
+                                <div className="flex items-start gap-2 text-sm">
+                                  <span className="text-gray-500 min-w-[120px]">Основа:</span>
+                                  <span className="text-gray-900 font-medium">{it.productBase}</span>
+                                </div>
+                              )}
+                              {it.stickerShape && (
+                                <div className="flex items-start gap-2 text-sm">
+                                  <span className="text-gray-500 min-w-[120px]">Форма:</span>
+                                  <span className="text-gray-900 font-medium">{it.stickerShape}</span>
+                                </div>
+                              )}
+                              {it.lamination && (
+                                <div className="flex items-start gap-2 text-sm">
+                                  <span className="text-gray-500 min-w-[120px]">Ламинация:</span>
+                                  <span className="text-gray-900 font-medium">{it.lamination}</span>
                                 </div>
                               )}
                             </>
