@@ -78,7 +78,6 @@ const formatMoney = (value: number) =>
 
 interface ProposalModalProps {
   open: boolean
-  leads: FunnelLead[]
   lead: FunnelLead | null
   onClose: () => void
   onCompleted: (leadId: string, movedToWaiting: boolean) => void
@@ -86,12 +85,10 @@ interface ProposalModalProps {
 
 export default function ProposalModal({
   open,
-  leads,
   lead,
   onClose,
   onCompleted,
 }: ProposalModalProps) {
-  const [selectedId, setSelectedId] = useState('')
   const [form, setForm] = useState<ProposalForm>(() => blankForm(null))
   const [exampleOpen, setExampleOpen] = useState(true)
   const [moveToWaiting, setMoveToWaiting] = useState(false)
@@ -99,27 +96,20 @@ export default function ProposalModal({
   const [loadingSaved, setLoadingSaved] = useState(false)
 
   useEffect(() => {
-    if (!open) return
-    setSelectedId(lead?.id ?? '')
-    setMoveToWaiting(false)
-    if (!lead?.id) setForm(blankForm(null))
-  }, [open, lead?.id])
-
-  useEffect(() => {
-    if (!open || !selectedId) return
+    if (!open || !lead) return
     let cancelled = false
-    const source = leads.find((item) => item.id === selectedId) ?? (lead?.id === selectedId ? lead : null)
-    setForm(blankForm(source))
+    setMoveToWaiting(false)
+    setForm(blankForm(lead))
     setLoadingSaved(true)
     api
-      .get(`/leads/${selectedId}/proposal`)
+      .get(`/leads/${lead.id}/proposal`)
       .then((response) => {
         if (cancelled) return
         const saved = response.data?.proposal
         if (!saved) return
         setForm({
-          clientName: saved.clientName ?? source?.client.name ?? '',
-          companyName: saved.companyName ?? source?.client.company ?? '',
+          clientName: saved.clientName ?? lead.client.name ?? '',
+          companyName: saved.companyName ?? lead.client.company ?? '',
           productLine: saved.productLine ?? '',
           subtitle: saved.subtitle ?? '',
           intro: saved.intro ?? '',
@@ -148,9 +138,9 @@ export default function ProposalModal({
     return () => {
       cancelled = true
     }
-  }, [open, selectedId])
+  }, [open, lead])
 
-  if (!open) return null
+  if (!open || !lead) return null
 
   const total = form.items.reduce((sum, item) => {
     const quantity = Number(item.quantity)
@@ -194,14 +184,10 @@ export default function ProposalModal({
   }
 
   const handleSubmit = async () => {
-    if (!selectedId) {
-      alert('Выберите контакт')
-      return
-    }
     setSaving(true)
     try {
       const response = await api.post(
-        `/leads/${selectedId}/proposal`,
+        `/leads/${lead.id}/proposal`,
         {
           ...form,
           moveToWaiting,
@@ -214,10 +200,9 @@ export default function ProposalModal({
         },
         { responseType: 'blob' },
       )
-      const clientName = leads.find((item) => item.id === selectedId)?.client.name || lead?.client.name || 'клиент'
-      const fileName = `КП ${form.productLine || 'Бирка Маркет'} — ${clientName}.pdf`
+      const fileName = `КП ${form.productLine || 'Бирка Маркет'} — ${lead.client.name}.pdf`
       await showInvoicePdfFromBlob(response.data, fileName, null)
-      onCompleted(selectedId, moveToWaiting)
+      onCompleted(lead.id, moveToWaiting)
     } catch (error: any) {
       console.error('Failed to create proposal:', error)
       let message = 'Не удалось сформировать КП'
@@ -244,7 +229,7 @@ export default function ProposalModal({
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
           <div>
             <h3 className="text-lg font-semibold text-gray-900">Сформировать КП</h3>
-            <p className="text-xs text-gray-500">PDF собирается по бланку «Бирка Маркет», Word-шаблон не нужен.</p>
+            <p className="text-xs text-gray-500">Для {lead.client.name}. PDF собирается по бланку «Бирка Маркет».</p>
           </div>
           <button
             type="button"
@@ -289,25 +274,6 @@ export default function ProposalModal({
               </div>
             ) : null}
           </div>
-
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium text-gray-700">Контакт в воронке</span>
-            <select
-              value={selectedId}
-              disabled={Boolean(lead)}
-              onChange={(event) => setSelectedId(event.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50"
-            >
-              <option value="">Выберите контакт</option>
-              {leads.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.client.name}
-                  {item.client.company ? ` · ${item.client.company}` : ''}
-                  {item.client.phone ? ` · ${item.client.phone}` : ''}
-                </option>
-              ))}
-            </select>
-          </label>
 
           {loadingSaved ? <p className="text-sm text-gray-500">Подставляем прошлое предложение…</p> : null}
 

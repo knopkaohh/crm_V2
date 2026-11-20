@@ -33,7 +33,7 @@ interface LeadFunnelProps {
   leads: FunnelLead[]
   loading: boolean
   onStageChange: (leadId: string, stage: FunnelStageId) => void
-  onCreateProposal: (lead: FunnelLead | null) => void
+  onCreateProposal: (lead: FunnelLead) => void
 }
 
 const formatWhen = (dateString: string | null) => {
@@ -68,17 +68,9 @@ export default function LeadFunnel({
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Воронка</h2>
           <p className="text-sm text-gray-500">
-            Перетащите карточку в другой этап. КП формируется по выбранному контакту.
+            Перетащите карточку в другой этап. КП открывается кнопкой на карточке этого клиента.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => onCreateProposal(null)}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700"
-        >
-          <FileText className="h-4 w-4" />
-          Сформировать КП
-        </button>
       </div>
 
       {loading && leads.length === 0 ? (
