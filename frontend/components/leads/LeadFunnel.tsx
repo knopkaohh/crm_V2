@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { FileText, Phone } from 'lucide-react'
+import { FileText, Phone, ShoppingCart, UserX, X } from 'lucide-react'
 
 export const FUNNEL_STAGES = [
   { id: 'NEW_LEAD', label: 'Новый лид', dot: 'bg-emerald-500' },
@@ -19,6 +19,7 @@ export interface FunnelLead {
   nextContactDate: string | null
   source?: string | null
   client: {
+    id?: string
     name: string
     phone: string
     company?: string | null
@@ -34,6 +35,9 @@ interface LeadFunnelProps {
   loading: boolean
   onStageChange: (leadId: string, stage: FunnelStageId) => void
   onCreateProposal: (lead: FunnelLead | null) => void
+  onCreateOrder: (lead: FunnelLead) => void
+  onCloseLead: (lead: FunnelLead) => void
+  onDeleteLead: (lead: FunnelLead) => void
 }
 
 const formatWhen = (dateString: string | null) => {
@@ -53,6 +57,9 @@ export default function LeadFunnel({
   loading,
   onStageChange,
   onCreateProposal,
+  onCreateOrder,
+  onCloseLead,
+  onDeleteLead,
 }: LeadFunnelProps) {
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOverStage, setDragOverStage] = useState<string | null>(null)
@@ -68,7 +75,7 @@ export default function LeadFunnel({
         <div className="px-4 text-center sm:px-48">
           <h2 className="text-xl font-semibold text-gray-900">Воронка</h2>
           <p className="text-sm text-gray-500">
-            Перетащите карточку в другой этап. Кнопка на карточке собирает КП для этого клиента.
+            Перетащите карточку в другой этап.
           </p>
         </div>
         <button
@@ -139,7 +146,20 @@ export default function LeadFunnel({
                           }}
                           className="cursor-grab rounded-xl border border-gray-200 bg-white p-3 shadow-sm active:cursor-grabbing"
                         >
-                          <h4 className="text-sm font-semibold text-gray-900">{lead.client.name}</h4>
+                          <div className="flex items-start gap-2">
+                            <h4 className="min-w-0 flex-1 text-sm font-semibold text-gray-900">{lead.client.name}</h4>
+                            <button
+                              type="button"
+                              draggable={false}
+                              onMouseDown={(event) => event.stopPropagation()}
+                              onClick={() => onDeleteLead(lead)}
+                              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-gray-400 transition hover:bg-red-50 hover:text-red-600"
+                              aria-label="Удалить"
+                              title="Удалить"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
                           <p className="mt-1 flex items-center gap-1 text-xs text-gray-500">
                             <Phone className="h-3.5 w-3.5" />
                             {lead.client.phone || '—'}
@@ -165,16 +185,28 @@ export default function LeadFunnel({
                               {lead.manager.firstName} {lead.manager.lastName}
                             </p>
                           ) : null}
-                          <button
-                            type="button"
-                            draggable={false}
-                            onMouseDown={(event) => event.stopPropagation()}
-                            onClick={() => onCreateProposal(lead)}
-                            className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-primary-200 bg-primary-50 px-2 py-1.5 text-xs font-semibold text-primary-700 transition hover:bg-primary-100"
-                          >
-                            <FileText className="h-3.5 w-3.5" />
-                            Сформировать КП
-                          </button>
+                          <div className="mt-3 grid grid-cols-1 gap-1.5">
+                            <button
+                              type="button"
+                              draggable={false}
+                              onMouseDown={(event) => event.stopPropagation()}
+                              onClick={() => onCreateOrder(lead)}
+                              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                            >
+                              <ShoppingCart className="h-3.5 w-3.5" />
+                              Оформить заказ
+                            </button>
+                            <button
+                              type="button"
+                              draggable={false}
+                              onMouseDown={(event) => event.stopPropagation()}
+                              onClick={() => onCloseLead(lead)}
+                              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-semibold text-gray-600 transition hover:bg-gray-100"
+                            >
+                              <UserX className="h-3.5 w-3.5" />
+                              Закрыть контакт
+                            </button>
+                          </div>
                         </article>
                       )
                     })

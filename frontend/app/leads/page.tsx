@@ -1198,8 +1198,10 @@ export default function LeadsPage() {
         setFutureLeads((prev) =>
           prev.filter((lead) => lead.id !== closedContact.leadId),
         )
+        setFunnelLeads((prev) => prev.filter((lead) => lead.id !== closedContact.leadId))
       } else {
         loadLeads({ showSpinner: false })
+        if (contactsView === 'funnel') void loadFunnelLeads()
       }
       resetModalState()
     } catch (error) {
@@ -1218,6 +1220,7 @@ export default function LeadsPage() {
       await api.delete(`/leads/${selectedLead.id}`)
       alert('Лид удалён')
       resetModalState()
+      setFunnelLeads((prev) => prev.filter((lead) => lead.id !== selectedLead.id))
       loadLeads()
     } catch (error) {
       console.error('Failed to delete lead:', error)
@@ -1954,6 +1957,18 @@ export default function LeadsPage() {
             onCreateProposal={(lead) => {
               setProposalLead(lead)
               setProposalOpen(true)
+            }}
+            onCreateOrder={(lead) => {
+              const full = funnelLeads.find((item) => item.id === lead.id)
+              if (full) void openLeadModal(full, 'order')
+            }}
+            onCloseLead={(lead) => {
+              const full = funnelLeads.find((item) => item.id === lead.id)
+              if (full) void openLeadModal(full, 'close')
+            }}
+            onDeleteLead={(lead) => {
+              const full = funnelLeads.find((item) => item.id === lead.id)
+              if (full) void openLeadModal(full, 'delete')
             }}
           />
         ) : loading ? (
