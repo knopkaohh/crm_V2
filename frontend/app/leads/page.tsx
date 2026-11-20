@@ -14,7 +14,7 @@ import { useRouter } from 'next/navigation'
 import Layout from '@/components/Layout'
 import api from '@/lib/api'
 import { auth, type User } from '@/lib/auth'
-import { canHardDeleteLead } from '@/lib/leads-permissions'
+import { canHardDeleteLead, canViewAllLeads } from '@/lib/leads-permissions'
 import LeadFunnel, { type FunnelLead, type FunnelStageId } from '@/components/leads/LeadFunnel'
 import ProposalModal from '@/components/leads/ProposalModal'
 import {
@@ -279,12 +279,13 @@ function appendContactResultToLeadDescription(
 
 export default function LeadsPage() {
   const router = useRouter()
-  const [currentUser, setCurrentUser] = useState<User | null>(null)
+  const [currentUser, setCurrentUser] = useState<User | null>(() => auth.getCachedUser())
   const [todayLeads, setTodayLeads] = useState<Lead[]>([])
   const [futureLeads, setFutureLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
   const [sourceFilter, setSourceFilter] = useState('all')
-  const [managerFilter, setManagerFilter] = useState('all')
+  const [managerFilter, setManagerFilter] = useState(() => auth.getCachedUser()?.id ?? '')
+  const managerFilterTouchedRef = useRef(false)
   const [managerOptions, setManagerOptions] = useState<LeadManagerOption[]>([])
   const [contactsSearchInput, setContactsSearchInput] = useState('')
   const [contactsSearchDebounced, setContactsSearchDebounced] = useState('')
@@ -559,7 +560,12 @@ export default function LeadsPage() {
 
   useEffect(() => {
     loadClients()
-    void auth.getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null))
+    void auth.getCurrentUser().then((user) => {
+      setCurrentUser(user)
+      if (!managerFilterTouchedRef.current) {
+        setManagerFilter(user.id)
+      }
+    }).catch(() => setCurrentUser(null))
   }, [])
 
   const loadClients = async () => {
@@ -615,6 +621,7 @@ export default function LeadsPage() {
   }, [showCalendar, sortedEventDates, todayKey])
 
   const loadLeads = useCallback(async (options?: { showSpinner?: boolean }) => {
+    if (!managerFilter) return
     const showSpinner = options?.showSpinner ?? true
     const searchParams: Record<string, string> = {}
     if (contactsSearchDebounced.length > 0) {
@@ -660,11 +667,13 @@ export default function LeadsPage() {
   }, [])
 
   useEffect(() => {
+    if (!managerFilter) return
     void loadLeads({ showSpinner: contactsInitialLoadRef.current })
     contactsInitialLoadRef.current = false
-  }, [loadLeads])
+  }, [loadLeads, managerFilter])
 
   const loadFunnelLeads = useCallback(async () => {
+    if (!managerFilter) return
     const searchParams: Record<string, string> = {}
     if (contactsSearchDebounced.length > 0) {
       searchParams.search = contactsSearchDebounced
@@ -1469,7 +1478,11 @@ export default function LeadsPage() {
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Контакты</h1>
             <p className="text-gray-600">
-              Управление контактами, быстрые заметки и перевод в заказы
+              {managerFilter === 'all'
+                ? 'Показаны контакты всех менеджеров'
+                : currentUser && managerFilter === currentUser.id
+                  ? 'Показаны только ваши контакты'
+                  : 'Управление контактами, быстрые заметки и перевод в заказы'}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -1492,7 +1505,10 @@ export default function LeadsPage() {
               type="button"
               onClick={() => setSearchOpen((prev) => !prev)}
               className={`relative inline-flex h-10 w-10 items-center justify-center rounded-xl border shadow-sm transition ${
-                searchOpen || contactsSearchInput.trim() || sourceFilter !== 'all' || managerFilter !== 'all'
+                searchOpen ||
+                contactsSearchInput.trim() ||
+                sourceFilter !== 'all' ||
+                (managerFilter !== '' && managerFilter !== currentUser?.id)
                   ? 'border-primary-200 bg-primary-50 text-primary-600'
                   : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
               }`}
@@ -1527,13 +1543,27 @@ export default function LeadsPage() {
 
         {searchOpen ? (
         <div className="rounded-2xl border border-primary-100 bg-gradient-to-r from-primary-50/70 via-white to-primary-50/30 p-4 shadow-sm">
-          <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold text-gray-900">Фильтры контактов</p>
-            {contactsSearchDebounced ? (
-              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-primary-600 shadow-sm">
-                Поиск активен
-              </span>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              {contactsSearchDebounced ? (
+                <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-primary-600 shadow-sm">
+                  Поиск активен
+                </span>
+              ) : null}
+              {canViewAllLeads(currentUser) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    managerFilterTouchedRef.current = true
+                    setManagerFilter(managerFilter === 'all' ? currentUser?.id ?? '' : 'all')
+                  }}
+                  className="rounded-xl border border-primary-200 bg-white px-3 py-1.5 text-sm font-medium text-primary-700 shadow-sm transition hover:bg-primary-50"
+                >
+                  {managerFilter === 'all' ? 'Только мои контакты' : 'Показать все контакты'}
+                </button>
+              ) : null}
+            </div>
           </div>
           <div className="mb-4">
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -1580,7 +1610,10 @@ export default function LeadsPage() {
             </label>
             <select
               value={managerFilter}
-              onChange={(event) => setManagerFilter(event.target.value)}
+              onChange={(event) => {
+                managerFilterTouchedRef.current = true
+                setManagerFilter(event.target.value)
+              }}
               className="w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
               <option value="all">Все менеджеры</option>
