@@ -34,6 +34,8 @@ function clipText(value: unknown, max: number): string {
 
 function parseProposalPayload(body: any): {
   error?: string;
+  clientName: string;
+  companyName: string;
   productLine: string;
   subtitle: string;
   intro: string;
@@ -45,26 +47,51 @@ function parseProposalPayload(body: any): {
   moveToWaiting: boolean;
   items: ProposalPdfItem[];
 } {
+  const clientName = clipText(body?.clientName, 160);
+  const companyName = clipText(body?.companyName, 160);
   const productLine = clipText(body?.productLine, 80);
   const subtitle = clipText(body?.subtitle, 240);
   const intro = String(body?.intro ?? '').trim().slice(0, 1200);
   const termsPrice = clipText(body?.termsPrice, 400);
   const termsPayment = clipText(body?.termsPayment, 400);
   const termsDelivery = clipText(body?.termsDelivery, 400);
-  const closingTitle = clipText(body?.closingTitle, 160);
-  const closingText = clipText(body?.closingText, 400);
+  const closingTitle = clipText(body?.closingTitle, 160) || 'Будем рады сотрудничеству!';
+  const closingText = clipText(body?.closingText, 400) || 'Готовы уточнить детали заказа и согласовать удобные условия поставки.';
   const moveToWaiting = Boolean(body?.moveToWaiting);
+  const base = {
+    clientName,
+    companyName,
+    productLine,
+    subtitle,
+    intro,
+    termsPrice,
+    termsPayment,
+    termsDelivery,
+    closingTitle,
+    closingText,
+    moveToWaiting,
+    items: [] as ProposalPdfItem[],
+  };
 
-  if (!productLine) {
-    return { error: 'Укажите линейку, например Zip-Lock', productLine, subtitle, intro, termsPrice, termsPayment, termsDelivery, closingTitle, closingText, moveToWaiting, items: [] };
+  if (!clientName) {
+    return { ...base, error: 'Укажите ФИО клиента' };
   }
-  if (!subtitle || !intro || !termsPrice || !termsPayment || !termsDelivery || !closingTitle || !closingText) {
-    return { error: 'Заполните текст предложения и условия', productLine, subtitle, intro, termsPrice, termsPayment, termsDelivery, closingTitle, closingText, moveToWaiting, items: [] };
+  if (!companyName) {
+    return { ...base, error: 'Укажите название компании' };
+  }
+  if (!productLine) {
+    return { ...base, error: 'Укажите линейку, например «Упаковка Zip-Lock»' };
+  }
+  if (!subtitle || !intro) {
+    return { ...base, error: 'Заполните подзаголовок и абзац' };
+  }
+  if (!termsPrice || !termsPayment || !termsDelivery) {
+    return { ...base, error: 'Заполните условия заказа' };
   }
 
   const rawItems = Array.isArray(body?.items) ? body.items : [];
   if (rawItems.length === 0 || rawItems.length > 20) {
-    return { error: 'Добавьте от 1 до 20 позиций', productLine, subtitle, intro, termsPrice, termsPayment, termsDelivery, closingTitle, closingText, moveToWaiting, items: [] };
+    return { ...base, error: 'Добавьте от 1 до 20 позиций' };
   }
 
   const items: ProposalPdfItem[] = [];
@@ -74,15 +101,15 @@ function parseProposalPayload(body: any): {
     const quantity = Number(raw?.quantity);
     const unitPrice = Number(String(raw?.unitPrice ?? '').replace(/\s/g, '').replace(',', '.'));
     if (!name || !Number.isFinite(quantity) || quantity < 1 || quantity > 100_000_000 || !Number.isInteger(quantity)) {
-      return { error: 'Проверьте наименование и количество в спецификации', productLine, subtitle, intro, termsPrice, termsPayment, termsDelivery, closingTitle, closingText, moveToWaiting, items: [] };
+      return { ...base, error: 'Проверьте наименование и количество в спецификации' };
     }
     if (!Number.isFinite(unitPrice) || unitPrice < 0 || unitPrice > 100_000_000) {
-      return { error: 'Проверьте цену за единицу', productLine, subtitle, intro, termsPrice, termsPayment, termsDelivery, closingTitle, closingText, moveToWaiting, items: [] };
+      return { ...base, error: 'Проверьте цену за единицу' };
     }
     items.push({ name, detail, quantity, unitPrice: Math.round(unitPrice * 100) / 100 });
   }
 
-  return { productLine, subtitle, intro, termsPrice, termsPayment, termsDelivery, closingTitle, closingText, moveToWaiting, items };
+  return { ...base, items };
 }
 
 // Получить все лиды
@@ -169,6 +196,7 @@ router.get('/', authenticate, async (req, res) => {
               id: true,
               name: true,
               phone: true,
+              company: true,
             },
           },
           manager: {
@@ -699,6 +727,8 @@ router.get('/:id/proposal', authenticate, async (req: AuthRequest, res) => {
 
     res.json({
       proposal: {
+        clientName: proposal.clientName,
+        companyName: proposal.companyName,
         productLine: proposal.productLine,
         subtitle: proposal.subtitle,
         intro: proposal.intro,
@@ -744,6 +774,8 @@ router.post('/:id/proposal', authenticate, async (req: AuthRequest, res) => {
     await prisma.commercialProposal.create({
       data: {
         leadId: id,
+        clientName: parsed.clientName,
+        companyName: parsed.companyName,
         productLine: parsed.productLine,
         subtitle: parsed.subtitle,
         intro: parsed.intro,

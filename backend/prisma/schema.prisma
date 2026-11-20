@@ -266,6 +266,8 @@ model Lead {
 model CommercialProposal {
   id             String   @id @default(uuid())
   leadId         String
+  clientName     String
+  companyName    String
   productLine    String
   subtitle       String
   intro          String

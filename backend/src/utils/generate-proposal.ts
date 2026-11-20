@@ -10,6 +10,8 @@ export interface ProposalPdfItem {
 }
 
 export interface ProposalPdfData {
+  clientName: string;
+  companyName: string;
   productLine: string;
   subtitle: string;
   intro: string;
@@ -129,7 +131,21 @@ export async function generateProposalPdf(data: ProposalPdfData): Promise<Buffer
 
     doc.font('regular').fontSize(11).fillColor(MUTED);
     doc.text(data.subtitle, MARGIN, y, { width: CONTENT_WIDTH });
-    y = doc.y + 12;
+    y = doc.y + 10;
+
+    doc.font('regular').fontSize(8).fillColor(MUTED);
+    doc.text('Клиент', MARGIN, y, { width: CONTENT_WIDTH });
+    y = doc.y + 1;
+    doc.font('bold').fontSize(10).fillColor(INK);
+    doc.text(data.clientName, MARGIN, y, { width: CONTENT_WIDTH });
+    y = doc.y + 1;
+    if (data.companyName.trim()) {
+      doc.font('regular').fontSize(10).fillColor('#333333');
+      doc.text(data.companyName, MARGIN, y, { width: CONTENT_WIDTH });
+      y = doc.y + 10;
+    } else {
+      y += 10;
+    }
 
     doc.font('regular').fontSize(10).fillColor('#333333');
     doc.text(data.intro, MARGIN, y, { width: CONTENT_WIDTH, lineGap: 2 });

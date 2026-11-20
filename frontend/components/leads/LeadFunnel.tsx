@@ -21,6 +21,7 @@ export interface FunnelLead {
   client: {
     name: string
     phone: string
+    company?: string | null
   }
   manager: {
     firstName: string
