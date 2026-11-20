@@ -15,6 +15,8 @@ import Layout from '@/components/Layout'
 import api from '@/lib/api'
 import { auth, type User } from '@/lib/auth'
 import { canHardDeleteLead } from '@/lib/leads-permissions'
+import LeadFunnel, { type FunnelLead, type FunnelStageId } from '@/components/leads/LeadFunnel'
+import ProposalModal from '@/components/leads/ProposalModal'
 import {
   Plus,
   Calendar,
@@ -36,6 +38,7 @@ import {
 interface Lead {
   id: string
   status: string
+  funnelStage?: string | null
   nextContactDate: string | null
   client: {
     id: string
@@ -330,6 +333,11 @@ export default function LeadsPage() {
   )
   const calendarOpenedRef = useRef(false)
   const contactsInitialLoadRef = useRef(true)
+  const [contactsView, setContactsView] = useState<'schedule' | 'funnel'>('schedule')
+  const [funnelLeads, setFunnelLeads] = useState<Lead[]>([])
+  const [funnelLoading, setFunnelLoading] = useState(false)
+  const [proposalLead, setProposalLead] = useState<FunnelLead | null>(null)
+  const [proposalOpen, setProposalOpen] = useState(false)
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -378,6 +386,11 @@ export default function LeadsPage() {
   const filteredFutureLeads = useMemo(
     () => sortLeadsWithOverdueFirst(futureLeads.filter(applyLeadFilters)),
     [futureLeads, sourceFilter, managerFilter],
+  )
+
+  const filteredFunnelLeads = useMemo(
+    () => sortLeadsWithOverdueFirst(funnelLeads.filter(applyLeadFilters)),
+    [funnelLeads, sourceFilter, managerFilter],
   )
 
   const filteredClients = useMemo(() => {
@@ -648,6 +661,63 @@ export default function LeadsPage() {
     void loadLeads({ showSpinner: contactsInitialLoadRef.current })
     contactsInitialLoadRef.current = false
   }, [loadLeads])
+
+  const loadFunnelLeads = useCallback(async () => {
+    const searchParams: Record<string, string> = {}
+    if (contactsSearchDebounced.length > 0) {
+      searchParams.search = contactsSearchDebounced
+    }
+    if (managerFilter !== 'all') {
+      searchParams.managerId = managerFilter
+    }
+
+    setFunnelLoading(true)
+    try {
+      const first = await api.get('/leads', {
+        params: { page: '1', limit: '200', ...searchParams },
+        headers: { 'X-Skip-Cache': '1' },
+      })
+      let rows: Lead[] = first.data.data || []
+      const totalPages = Number(first.data.pagination?.totalPages || 1)
+      for (let page = 2; page <= Math.min(totalPages, 5); page += 1) {
+        const next = await api.get('/leads', {
+          params: { page: String(page), limit: '200', ...searchParams },
+          headers: { 'X-Skip-Cache': '1' },
+        })
+        rows = rows.concat(next.data.data || [])
+      }
+      setFunnelLeads(rows)
+    } catch (error) {
+      console.error('Failed to load funnel leads:', error)
+    } finally {
+      setFunnelLoading(false)
+    }
+  }, [contactsSearchDebounced, managerFilter])
+
+  useEffect(() => {
+    if (contactsView !== 'funnel') return
+    void loadFunnelLeads()
+  }, [contactsView, loadFunnelLeads])
+
+  const patchLeadStage = (leadId: string, stage: string) => {
+    const apply = (list: Lead[]) =>
+      list.map((item) => (item.id === leadId ? { ...item, funnelStage: stage } : item))
+    setFunnelLeads(apply)
+    setTodayLeads(apply)
+    setFutureLeads(apply)
+  }
+
+  const handleFunnelStageChange = async (leadId: string, stage: FunnelStageId) => {
+    const previous = funnelLeads.find((item) => item.id === leadId)?.funnelStage ?? 'NEW_LEAD'
+    patchLeadStage(leadId, stage)
+    try {
+      await api.put(`/leads/${leadId}`, { funnelStage: stage })
+    } catch (error) {
+      console.error('Failed to change funnel stage:', error)
+      patchLeadStage(leadId, previous)
+      alert('Не удалось перенести контакт')
+    }
+  }
 
   const resetModalState = () => {
     setModalType(null)
@@ -1416,6 +1486,27 @@ export default function LeadsPage() {
           </div>
         </div>
 
+        <div className="inline-flex rounded-xl border border-gray-200 bg-white p-1 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setContactsView('schedule')}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+              contactsView === 'schedule' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            Сегодня
+          </button>
+          <button
+            type="button"
+            onClick={() => setContactsView('funnel')}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+              contactsView === 'funnel' ? 'bg-primary-600 text-white' : 'text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            Воронка
+          </button>
+        </div>
+
         <div className="rounded-2xl border border-primary-100 bg-gradient-to-r from-primary-50/70 via-white to-primary-50/30 p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-2">
             <p className="text-sm font-semibold text-gray-900">Фильтры контактов</p>
@@ -1839,7 +1930,17 @@ export default function LeadsPage() {
           </div>
         ) : null}
 
-        {loading ? (
+        {contactsView === 'funnel' ? (
+          <LeadFunnel
+            leads={filteredFunnelLeads}
+            loading={funnelLoading}
+            onStageChange={handleFunnelStageChange}
+            onCreateProposal={(lead) => {
+              setProposalLead(lead)
+              setProposalOpen(true)
+            }}
+          />
+        ) : loading ? (
           <div className="flex h-64 items-center justify-center">
             <div className="h-12 w-12 animate-spin rounded-full border-4 border-primary-100 border-t-primary-500" />
           </div>
@@ -1929,6 +2030,23 @@ export default function LeadsPage() {
           </div>
         )}
       </div>
+
+      <ProposalModal
+        open={proposalOpen}
+        leads={filteredFunnelLeads}
+        lead={proposalLead}
+        onClose={() => {
+          setProposalOpen(false)
+          setProposalLead(null)
+        }}
+        onCompleted={(leadId, movedToWaiting) => {
+          if (movedToWaiting) {
+            patchLeadStage(leadId, 'WAITING_CLIENT')
+          }
+          setProposalOpen(false)
+          setProposalLead(null)
+        }}
+      />
 
       <Modal
         open={showCalendar}
