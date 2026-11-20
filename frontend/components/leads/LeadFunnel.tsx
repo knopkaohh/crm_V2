@@ -64,13 +64,11 @@ export default function LeadFunnel({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-gray-900">Воронка</h2>
-          <p className="text-sm text-gray-500">
-            Перетащите карточку в другой этап. КП открывается кнопкой на карточке этого клиента.
-          </p>
-        </div>
+      <div className="text-center">
+        <h2 className="text-xl font-semibold text-gray-900">Воронка</h2>
+        <p className="text-sm text-gray-500">
+          Перетащите карточку в другой этап. КП открывается кнопкой на карточке этого клиента.
+        </p>
       </div>
 
       {loading && leads.length === 0 ? (
@@ -78,7 +76,8 @@ export default function LeadFunnel({
           <div className="h-12 w-12 animate-spin rounded-full border-4 border-primary-100 border-t-primary-500" />
         </div>
       ) : (
-        <div className="flex gap-3 overflow-x-auto pb-2">
+        <div className="overflow-x-auto pb-2">
+        <div className="mx-auto flex w-max min-w-full justify-center gap-3">
           {FUNNEL_STAGES.map((stage) => {
             const columnLeads = leads.filter((lead) => stageOf(lead) === stage.id)
             return (
@@ -174,6 +173,7 @@ export default function LeadFunnel({
               </div>
             )
           })}
+        </div>
         </div>
       )}
     </div>
